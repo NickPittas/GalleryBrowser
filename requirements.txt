@@ -1,0 +1,31 @@
+# Core
+PyQt6>=6.5.0
+SQLAlchemy>=2.0.0
+alembic>=1.12.0
+
+# Image processing
+Pillow>=10.0.0
+imageio>=2.31.0
+imageio-ffmpeg>=0.4.8
+
+# Video/Metadata
+pymediainfo>=6.0.0
+python-magic>=0.4.27
+
+# Icons
+qtawesome>=1.4.0
+
+# GStreamer (requires system site-packages)
+# PyGObject requires system GStreamer libraries
+# Create venv with: python3 -m venv venv --system-site-packages
+PyGObject>=3.44.0
+
+# Utilities
+appdirs>=1.4.4
+python-dateutil>=2.8.0
+
+# Development
+pytest>=7.4.0
+pytest-qt>=4.2.0
+black>=23.0.0
+ruff>=0.1.0

@@ -1,0 +1,1261 @@
+{
+  "session_id": "ses_7noba816",
+  "browser_session_id": "ses_pd0mb1tf",
+  "request": "Design a Python-based Gallery Browser application for Linux with PyQt6, GStreamer preview, SQLite metadata, and ComfyUI PNG workflow support. The app needs: 3-pane layout (tree, file grid/list, preview+info), centralized thumbnail cache, batch operations, drag-drop, Linux file manager integration, collections/tags, comparisons, image sequence playback, and format conversions.",
+  "created_at": 1772117847463,
+  "updated_at": 1772118294066,
+  "branches": {
+    "architecture": {
+      "id": "architecture",
+      "scope": "Core application architecture, tech stack decisions, module structure",
+      "status": "done",
+      "questions": [
+        {
+          "id": "q_w3z1b86n",
+          "type": "pick_one",
+          "text": "What GUI framework and architecture pattern should we use?",
+          "config": {
+            "question": "What GUI framework and architecture pattern should we use?",
+            "options": [
+              {
+                "label": "PyQt6 with MVC pattern",
+                "description": "Full Qt6 features, model-view architecture for file browser"
+              },
+              {
+                "label": "PySide6 with MVC pattern",
+                "description": "LGPL license, same features as PyQt6"
+              },
+              {
+                "label": "PyQt6 with simple widget-based",
+                "description": "Easier to implement, less abstraction"
+              }
+            ]
+          },
+          "answer": {
+            "selected": "undefined"
+          },
+          "answeredAt": 1772117869248
+        },
+        {
+          "id": "q_wkpfyhmd",
+          "type": "pick_one",
+          "text": "Choose the GUI framework + architecture pattern for core app.",
+          "config": {
+            "question": "Choose the GUI framework + architecture pattern for core app.",
+            "options": [
+              {
+                "id": "pyqt6-mvc",
+                "label": "PyQt6 + MVC (models for tree/grid/metadata)"
+              },
+              {
+                "id": "pyqt6-mvvm",
+                "label": "PyQt6 + MVVM (viewmodels + signals/slots)"
+              },
+              {
+                "id": "pyqt6-clean",
+                "label": "PyQt6 + Clean Architecture (usecases/repositories)"
+              },
+              {
+                "id": "pyqt6-mvp",
+                "label": "PyQt6 + MVP (presenters drive views)"
+              },
+              {
+                "id": "pyqt6-qtmodel",
+                "label": "PyQt6 + Qt Model/View (QAbstractItemModel-heavy)"
+              }
+            ],
+            "recommended": "pyqt6-qtmodel",
+            "context": "[Core application architecture, tech stack decisions, module structure] Need a pattern that fits Qt's model/view and supports 3-pane layout, caching, and background tasks."
+          },
+          "answer": {
+            "selected": "pyqt6-mvc"
+          },
+          "answeredAt": 1772118048347
+        }
+      ],
+      "finding": "Use PyQt6 with an MVC-style architecture for the core app (model for data/DB, views for UI panes, controllers for actions/events)."
+    },
+    "database": {
+      "id": "database",
+      "scope": "SQLite schema design for metadata, thumbnails, collections",
+      "status": "done",
+      "questions": [
+        {
+          "id": "q_e9sxxt8o",
+          "type": "show_options",
+          "text": "What should the database schema include?",
+          "config": {
+            "question": "What should the database schema include?",
+            "options": [
+              {
+                "label": "Files, Folders, Tags, Collections tables",
+                "description": "Basic relational structure with foreign keys",
+                "pros": [
+                  "Simple queries",
+                  "Easy to maintain",
+                  "Fast lookups"
+                ],
+                "cons": [
+                  "Limited extensibility"
+                ]
+              },
+              {
+                "label": "Files table with JSON metadata column",
+                "description": "Flexible schema with JSON for extensible metadata",
+                "pros": [
+                  "Can store any metadata",
+                  "Easy to add fields",
+                  "Good for ComfyUI JSON"
+                ],
+                "cons": [
+                  "Slower JSON queries",
+                  "Less type safety"
+                ]
+              },
+              {
+                "label": "Hybrid: Core tables + Metadata JSON",
+                "description": "Best of both worlds",
+                "pros": [
+                  "Fast core queries",
+                  "Flexible metadata"
+                ],
+                "cons": [
+                  "More complex"
+                ]
+              }
+            ]
+          },
+          "answer": {
+            "selected": "undefined"
+          },
+          "answeredAt": 1772117887125
+        },
+        {
+          "id": "q_wm0tquam",
+          "type": "show_options",
+          "text": "Pick the SQLite schema focus for v1 metadata.",
+          "config": {
+            "question": "Pick the SQLite schema focus for v1 metadata.",
+            "options": [
+              {
+                "id": "minimal_core",
+                "label": "Minimal core",
+                "description": "Files, folders, basic tags, thumbnail cache pointers."
+              },
+              {
+                "id": "full_metadata",
+                "label": "Full metadata",
+                "description": "EXIF/IPTC, size/hash, colors, ratings, labels."
+              },
+              {
+                "id": "collections",
+                "label": "Collections-first",
+                "description": "Collections, tag relationships, smart collections, saved filters."
+              },
+              {
+                "id": "workflow_meta",
+                "label": "Workflow metadata",
+                "description": "ComfyUI/PNG text chunks stored and searchable."
+              },
+              {
+                "id": "all_inclusive",
+                "label": "All-inclusive",
+                "description": "Everything above, normalized schema."
+              }
+            ],
+            "context": "[SQLite schema design for metadata, thumbnails, collections] This guides initial tables and indexes."
+          },
+          "answer": {
+            "selected": "full_metadata"
+          },
+          "answeredAt": 1772118065999
+        },
+        {
+          "id": "q_hkftv1ow",
+          "type": "pick_many",
+          "text": "For the SQLite schema (metadata focus), which entities must be first-class tables in v1?",
+          "config": {
+            "question": "For the SQLite schema (metadata focus), which entities must be first-class tables in v1?",
+            "options": [
+              {
+                "id": "files",
+                "label": "Files + paths + hashes"
+              },
+              {
+                "id": "metadata",
+                "label": "Extracted metadata (EXIF/PNG/etc.)"
+              },
+              {
+                "id": "thumbs",
+                "label": "Thumbnails cache index"
+              },
+              {
+                "id": "collections",
+                "label": "Collections/sets"
+              },
+              {
+                "id": "tags",
+                "label": "Tags + tag assignments"
+              },
+              {
+                "id": "comparisons",
+                "label": "Comparison sets/history"
+              },
+              {
+                "id": "sequences",
+                "label": "Image sequences"
+              },
+              {
+                "id": "comfyui",
+                "label": "ComfyUI workflow blobs + parsed fields"
+              }
+            ],
+            "min": 1,
+            "context": "[SQLite schema design for metadata, thumbnails, collections] Pick all that should be modeled explicitly rather than stored as JSON blobs."
+          },
+          "answer": {
+            "selected": [
+              "files",
+              "metadata",
+              "thumbs",
+              "collections",
+              "tags",
+              "sequences"
+            ]
+          },
+          "answeredAt": 1772118223833
+        }
+      ],
+      "finding": "SQLite v1 schema should include first-class tables for files, metadata, thumbnails, collections, tags, and sequences, with a full-metadata focus."
+    },
+    "preview": {
+      "id": "preview",
+      "scope": "GStreamer integration for preview widget, supported formats",
+      "status": "done",
+      "questions": [
+        {
+          "id": "q_58hq09qo",
+          "type": "pick_one",
+          "text": "How should we implement the GStreamer preview?",
+          "config": {
+            "question": "How should we implement the GStreamer preview?",
+            "options": [
+              {
+                "label": "QGstGLWidget with playbin3",
+                "description": "Native Qt-GStreamer integration, hardware accelerated"
+              },
+              {
+                "label": "Custom QGLWidget with appsink",
+                "description": "Manual frame extraction, more control"
+              },
+              {
+                "label": "gi.repository.Gst with QImage",
+                "description": "Pure GStreamer, convert to QImage manually"
+              }
+            ]
+          },
+          "answer": {
+            "selected": "undefined"
+          },
+          "answeredAt": 1772117901109
+        },
+        {
+          "id": "q_32ehj4gx",
+          "type": "pick_one",
+          "text": "GStreamer preview: embed a single persistent pipeline in the preview pane, or create per-file pipelines for isolation?",
+          "config": {
+            "question": "GStreamer preview: embed a single persistent pipeline in the preview pane, or create per-file pipelines for isolation?",
+            "options": [
+              {
+                "id": "single_persistent",
+                "label": "Single persistent pipeline",
+                "description": "Reuse one pipeline for all previews; faster switching"
+              },
+              {
+                "id": "per_file",
+                "label": "Per-file pipeline",
+                "description": "New pipeline per preview; cleaner isolation"
+              },
+              {
+                "id": "hybrid",
+                "label": "Hybrid",
+                "description": "Persistent pipeline for common formats, per-file for others"
+              }
+            ],
+            "recommended": "single_persistent",
+            "context": "[GStreamer integration for preview widget, supported formats]"
+          },
+          "answer": {
+            "selected": "hybrid"
+          },
+          "answeredAt": 1772118081546
+        },
+        {
+          "id": "q_2pnnnk5h",
+          "type": "pick_many",
+          "text": "For the GStreamer preview in v1, which content types must be supported in the preview pane?",
+          "config": {
+            "question": "For the GStreamer preview in v1, which content types must be supported in the preview pane?",
+            "options": [
+              {
+                "id": "images_static",
+                "label": "Static images (PNG/JPG/EXR) and still preview"
+              },
+              {
+                "id": "video",
+                "label": "Video files (MP4/MKV/etc.)"
+              },
+              {
+                "id": "image_sequences",
+                "label": "Image sequences (frame-by-frame playback)"
+              }
+            ],
+            "min": 1,
+            "context": "[GStreamer integration for preview widget, supported formats]"
+          },
+          "answer": {
+            "selected": [
+              "images_static",
+              "video",
+              "image_sequences"
+            ]
+          },
+          "answeredAt": 1772118229736
+        },
+        {
+          "id": "q_a3401lp0",
+          "type": "pick_one",
+          "text": "For the hybrid GStreamer preview, how should the video sink integrate with the PyQt6 preview widget?",
+          "config": {
+            "question": "For the hybrid GStreamer preview, how should the video sink integrate with the PyQt6 preview widget?",
+            "options": [
+              {
+                "id": "glsink",
+                "label": "Use glimagesink/glsinkbin embedded in a Qt OpenGL widget"
+              },
+              {
+                "id": "qtvideosink",
+                "label": "Use qtvideosink to render directly into a QWidget"
+              },
+              {
+                "id": "appsink",
+                "label": "Use appsink and render frames via Qt (QImage/QtOpenGL)"
+              }
+            ],
+            "recommended": "qtvideosink",
+            "context": "[GStreamer integration for preview widget, supported formats] This choice affects preview performance, GPU usage, and implementation complexity."
+          },
+          "answer": {
+            "selected": "qtvideosink"
+          },
+          "answeredAt": 1772118278566
+        }
+      ],
+      "finding": "Use a hybrid GStreamer preview: a persistent preview pipeline with per-file isolation as needed, supporting static images, video, and image sequences, and integrate with the PyQt6 preview widget via qtvideosink."
+    },
+    "thumbnails": {
+      "id": "thumbnails",
+      "scope": "Thumbnail generation strategy, caching, background processing",
+      "status": "done",
+      "questions": [
+        {
+          "id": "q_vbwv71ts",
+          "type": "show_options",
+          "text": "Thumbnail generation approach?",
+          "config": {
+            "question": "Thumbnail generation approach?",
+            "options": [
+              {
+                "label": "Background thread pool with LRU cache",
+                "description": "Generate on-demand, cache in memory and disk",
+                "pros": [
+                  "Responsive UI",
+                  "Efficient memory use"
+                ],
+                "cons": [
+                  "Initial delay"
+                ]
+              },
+              {
+                "label": "Pre-generate all thumbnails",
+                "description": "Scan folder and generate all at once",
+                "pros": [
+                  "No delay when browsing"
+                ],
+                "cons": [
+                  "Slow initial load",
+                  "Wastes resources"
+                ]
+              },
+              {
+                "label": "Hybrid: Smart pre-generation",
+                "description": "Generate visible + nearby items",
+                "pros": [
+                  "Best balance"
+                ],
+                "cons": [
+                  "More complex logic"
+                ]
+              }
+            ]
+          },
+          "answer": {
+            "selected": "undefined"
+          },
+          "answeredAt": 1772117920142
+        },
+        {
+          "id": "q_cucmyj82",
+          "type": "show_options",
+          "text": "Thumbnail strategy for v1: where and how to cache/generate?",
+          "config": {
+            "question": "Thumbnail strategy for v1: where and how to cache/generate?",
+            "options": [
+              {
+                "id": "disk_cache_bg_workers",
+                "label": "Disk cache + background workers",
+                "description": "Store thumbs on disk keyed by file path+mtime; generate in worker threads with a queue"
+              },
+              {
+                "id": "sqlite_blob_cache",
+                "label": "SQLite blob cache",
+                "description": "Store thumbs as blobs in SQLite with size/mtime keys; generate in worker threads"
+              },
+              {
+                "id": "hybrid_cache",
+                "label": "Hybrid cache",
+                "description": "Disk cache for images, SQLite for metadata; optional in-memory LRU"
+              }
+            ],
+            "recommended": "hybrid_cache",
+            "allowFeedback": true,
+            "context": "[Thumbnail generation strategy, caching, background processing] Need a default for centralized thumbnail cache and background generation."
+          },
+          "answer": {
+            "selected": "disk_cache_bg_workers"
+          },
+          "answeredAt": 1772118105723
+        }
+      ],
+      "finding": "Use a centralized on-disk thumbnail cache with background worker generation for v1."
+    },
+    "file_ops": {
+      "id": "file_ops",
+      "scope": "File operations: move, copy, rename, batch, drag-drop",
+      "status": "done",
+      "questions": [
+        {
+          "id": "q_iip80i7w",
+          "type": "pick_many",
+          "text": "Which file operations are essential for v1?",
+          "config": {
+            "question": "Which file operations are essential for v1?",
+            "options": [
+              {
+                "label": "Basic: Copy/Move/Delete/Rename",
+                "description": "Standard file operations"
+              },
+              {
+                "label": "Batch rename with tokens",
+                "description": "{date}_{model}_{seed} pattern support"
+              },
+              {
+                "label": "Drag and drop",
+                "description": "Between folders and from external apps"
+              },
+              {
+                "label": "Linux context menu integration",
+                "description": "Open with GalleryBrowser from Nemo/Dolphin"
+              },
+              {
+                "label": "Undo/Redo for operations",
+                "description": "Safety net for file operations"
+              }
+            ]
+          },
+          "answer": {
+            "selected": [
+              "undefined",
+              "undefined",
+              "undefined"
+            ]
+          },
+          "answeredAt": 1772117933586
+        },
+        {
+          "id": "q_zsa40my0",
+          "type": "pick_many",
+          "text": "Which file operations are essential for v1?",
+          "config": {
+            "question": "Which file operations are essential for v1?",
+            "options": [
+              {
+                "id": "copy_move",
+                "label": "Copy/move files (including across volumes)"
+              },
+              {
+                "id": "rename",
+                "label": "Rename (single + batch templates)"
+              },
+              {
+                "id": "delete",
+                "label": "Delete (trash + permanent)"
+              },
+              {
+                "id": "drag_drop",
+                "label": "Drag-and-drop between panes/collections"
+              },
+              {
+                "id": "bulk_metadata",
+                "label": "Bulk tag/metadata edits"
+              },
+              {
+                "id": "export",
+                "label": "Export/duplicate to folder"
+              },
+              {
+                "id": "open_in_fm",
+                "label": "Open in file manager / reveal in folder"
+              }
+            ],
+            "min": 1,
+            "context": "[File operations: move, copy, rename, batch, drag-drop] Pick the operations you want in the initial release."
+          },
+          "answer": {
+            "selected": [
+              "copy_move",
+              "rename",
+              "delete",
+              "drag_drop",
+              "open_in_fm"
+            ]
+          },
+          "answeredAt": 1772118120104
+        }
+      ],
+      "finding": "For v1, include essential file operations: copy/move, rename, delete, drag-and-drop, and open in file manager integration."
+    },
+    "comfyui": {
+      "id": "comfyui",
+      "scope": "ComfyUI metadata parsing, workflow display, organization",
+      "status": "done",
+      "questions": [
+        {
+          "id": "q_g8ixvj6n",
+          "type": "pick_one",
+          "text": "How to handle ComfyUI PNG metadata?",
+          "config": {
+            "question": "How to handle ComfyUI PNG metadata?",
+            "options": [
+              {
+                "label": "Parse on import, store in DB",
+                "description": "Extract workflow JSON once, query from DB",
+                "pros": [
+                  "Fast display",
+                  "Searchable"
+                ],
+                "cons": [
+                  "DB bloat"
+                ]
+              },
+              {
+                "label": "Parse on-demand from file",
+                "description": "Read PNG chunks when viewing",
+                "pros": [
+                  "Always current",
+                  "No DB storage"
+                ],
+                "cons": [
+                  "Slower display"
+                ]
+              },
+              {
+                "label": "Parse and cache as JSON files",
+                "description": "Sidecar .json files with extracted data",
+                "pros": [
+                  "Portable",
+                  "Fast",
+                  "No DB bloat"
+                ],
+                "cons": [
+                  "Extra files"
+                ]
+              }
+            ]
+          },
+          "answer": {
+            "selected": "undefined"
+          },
+          "answeredAt": 1772117942707
+        },
+        {
+          "id": "q_0sx2pldm",
+          "type": "pick_one",
+          "text": "For ComfyUI PNG metadata in v1, which handling do you want?",
+          "config": {
+            "question": "For ComfyUI PNG metadata in v1, which handling do you want?",
+            "options": [
+              {
+                "id": "read-only",
+                "label": "Read-only parse and display workflow prompt/params from PNG text chunks"
+              },
+              {
+                "id": "import-db",
+                "label": "Parse and persist key fields into SQLite for search/filter"
+              },
+              {
+                "id": "sidecar",
+                "label": "Extract to sidecar JSON on demand plus display"
+              }
+            ],
+            "recommended": "read-only",
+            "context": "[ComfyUI metadata parsing, workflow display, organization] Pick the simplest viable handling for ComfyUI metadata in v1."
+          },
+          "answer": {
+            "selected": "read-only"
+          },
+          "answeredAt": 1772118133146
+        },
+        {
+          "id": "q_4kboh4f1",
+          "type": "pick_one",
+          "text": "For ComfyUI PNG metadata in v1 (read-only), how should the workflow be displayed?",
+          "config": {
+            "question": "For ComfyUI PNG metadata in v1 (read-only), how should the workflow be displayed?",
+            "options": [
+              {
+                "id": "raw_json_panel",
+                "label": "Raw JSON/text panel",
+                "description": "Show the embedded JSON blob in a readable text view"
+              },
+              {
+                "id": "parsed_key_value",
+                "label": "Parsed key/value details",
+                "description": "Extract common fields (model, sampler, steps, seed, prompts) into a structured info view"
+              },
+              {
+                "id": "mini_graph_view",
+                "label": "Simplified graph view",
+                "description": "Render a lightweight node/edge view of the workflow"
+              }
+            ],
+            "recommended": "parsed_key_value",
+            "context": "[ComfyUI metadata parsing, workflow display, organization] This affects the info pane UX and parsing depth."
+          },
+          "answer": {
+            "selected": "parsed_key_value"
+          },
+          "answeredAt": 1772118245545
+        }
+      ],
+      "finding": "ComfyUI PNG metadata in v1 should be read-only, displayed as a parsed key/value workflow view."
+    },
+    "ui_layout": {
+      "id": "ui_layout",
+      "scope": "Main window layout, panes, toolbars, shortcuts",
+      "status": "done",
+      "questions": [
+        {
+          "id": "q_a1lypq2l",
+          "type": "pick_one",
+          "text": "Preferred layout configuration?",
+          "config": {
+            "question": "Preferred layout configuration?",
+            "options": [
+              {
+                "label": "3-pane fixed (Tree | Files | Preview)",
+                "description": "Traditional file manager layout",
+                "pros": [
+                  "Familiar",
+                  "Simple"
+                ],
+                "cons": [
+                  "Limited flexibility"
+                ]
+              },
+              {
+                "label": "2-pane with collapsible preview",
+                "description": "Tree+Files main, preview slides in",
+                "pros": [
+                  "More space for files"
+                ],
+                "cons": [
+                  "Extra click for preview"
+                ]
+              },
+              {
+                "label": "Fully customizable dockable",
+                "description": "Qt dock widgets, user arranges",
+                "pros": [
+                  "Maximum flexibility"
+                ],
+                "cons": [
+                  "Complex implementation"
+                ]
+              }
+            ]
+          },
+          "answer": {
+            "selected": "undefined"
+          },
+          "answeredAt": 1772117948499
+        },
+        {
+          "id": "q_vcoy41wb",
+          "type": "pick_one",
+          "text": "For v1, which 3-pane layout do you want as the default?",
+          "config": {
+            "question": "For v1, which 3-pane layout do you want as the default?",
+            "options": [
+              {
+                "id": "classic",
+                "label": "Classic",
+                "description": "Left tree, center grid/list, right preview+info"
+              },
+              {
+                "id": "wide_preview",
+                "label": "Wide Preview",
+                "description": "Left tree, center preview+info, right grid/list"
+              },
+              {
+                "id": "stacked_right",
+                "label": "Stacked Right",
+                "description": "Left tree, center grid/list, right preview above info/tags/metadata"
+              },
+              {
+                "id": "detachable",
+                "label": "Detachable",
+                "description": "Classic, but preview pane can pop out into a separate window"
+              }
+            ],
+            "recommended": "classic",
+            "context": "[Main window layout, panes, toolbars, shortcuts] This sets the default pane arrangement for the main window."
+          },
+          "answer": {
+            "selected": "classic"
+          },
+          "answeredAt": 1772118153978
+        },
+        {
+          "id": "q_znzpb6ax",
+          "type": "pick_one",
+          "text": "For v1, should the main window include a top toolbar and a bottom status bar by default?",
+          "config": {
+            "question": "For v1, should the main window include a top toolbar and a bottom status bar by default?",
+            "options": [
+              {
+                "id": "toolbar_and_status",
+                "label": "Top toolbar + bottom status bar",
+                "description": "Standard app layout with actions and file/selection info"
+              },
+              {
+                "id": "toolbar_only",
+                "label": "Top toolbar only",
+                "description": "Actions accessible; less vertical chrome"
+              },
+              {
+                "id": "minimal_chrome",
+                "label": "Minimal chrome",
+                "description": "No default toolbar/status bar; actions via context menus/shortcuts"
+              }
+            ],
+            "recommended": "toolbar_and_status",
+            "context": "[Main window layout, panes, toolbars, shortcuts]"
+          },
+          "answer": {
+            "selected": "toolbar_and_status"
+          },
+          "answeredAt": 1772118249807
+        }
+      ],
+      "finding": "Use the classic 3‑pane layout as default (tree left, file grid/list center, preview+info right) with both a top toolbar and bottom status bar enabled by default."
+    },
+    "features": {
+      "id": "features",
+      "scope": "Additional features: collections, comparisons, conversions",
+      "status": "done",
+      "questions": [
+        {
+          "id": "q_ed0lus20",
+          "type": "pick_many",
+          "text": "Which advanced features for v1?",
+          "config": {
+            "question": "Which advanced features for v1?",
+            "options": [
+              {
+                "label": "Collections/Tags system",
+                "description": "Organize without moving files"
+              },
+              {
+                "label": "Image comparison (2-up, swipe)",
+                "description": "Before/after or A/B comparison"
+              },
+              {
+                "label": "Image sequence playback",
+                "description": "Play numbered sequences as video"
+              },
+              {
+                "label": "Format conversion",
+                "description": "Export to different formats via FFmpeg"
+              },
+              {
+                "label": "Duplicate detection",
+                "description": "Find similar images perceptually"
+              },
+              {
+                "label": "Metadata search/filter",
+                "description": "Filter by prompt, model, etc."
+              }
+            ]
+          },
+          "answer": {
+            "selected": [
+              "undefined",
+              "undefined",
+              "undefined",
+              "undefined"
+            ]
+          },
+          "answeredAt": 1772117960796
+        },
+        {
+          "id": "q_aivk4s9e",
+          "type": "pick_many",
+          "text": "Which advanced features should v1 include?",
+          "config": {
+            "question": "Which advanced features should v1 include?",
+            "options": [
+              {
+                "id": "collections",
+                "label": "Collections/sets management",
+                "description": "User-defined groups beyond folders"
+              },
+              {
+                "id": "tags",
+                "label": "Tagging system",
+                "description": "Freeform tags with search/filter"
+              },
+              {
+                "id": "comparisons",
+                "label": "Side-by-side comparisons",
+                "description": "Compare 2–4 images/videos"
+              },
+              {
+                "id": "sequence_playback",
+                "label": "Image sequence playback",
+                "description": "Play numbered sequences like video"
+              },
+              {
+                "id": "format_conversions",
+                "label": "Format conversions",
+                "description": "Batch convert/resize/encode"
+              },
+              {
+                "id": "smart_filters",
+                "label": "Smart filters/saved searches",
+                "description": "Persisted query views"
+              }
+            ],
+            "min": 1,
+            "max": 4,
+            "context": "[Additional features: collections, comparisons, conversions] Pick the must-have advanced features for v1."
+          },
+          "answer": {
+            "selected": [
+              "collections",
+              "comparisons",
+              "sequence_playback",
+              "format_conversions",
+              "smart_filters"
+            ]
+          },
+          "answeredAt": 1772118172149
+        }
+      ],
+      "finding": "Include v1 advanced features: collections/tags management, side-by-side comparisons, image sequence playback, format conversions, and smart filters."
+    },
+    "linux_integration": {
+      "id": "linux_integration",
+      "scope": "Linux desktop integration: MIME types, .desktop files, D-Bus",
+      "status": "done",
+      "questions": [
+        {
+          "id": "q_ftz8mrx7",
+          "type": "pick_one",
+          "text": "Single instance strategy?",
+          "config": {
+            "question": "Single instance strategy?",
+            "options": [
+              {
+                "label": "D-Bus service with activator",
+                "description": "Proper Linux integration, complex",
+                "pros": [
+                  "Native feel",
+                  "Standard"
+                ],
+                "cons": [
+                  "Complex setup"
+                ]
+              },
+              {
+                "label": "Socket-based single instance",
+                "description": "Check running instance via socket",
+                "pros": [
+                  "Simple",
+                  "Reliable"
+                ],
+                "cons": [
+                  "Not native D-Bus"
+                ]
+              },
+              {
+                "label": "File lock with IPC",
+                "description": "Lock file prevents multiple instances",
+                "pros": [
+                  "Very simple"
+                ],
+                "cons": [
+                  "Limited communication"
+                ]
+              }
+            ]
+          },
+          "answer": {
+            "selected": "undefined"
+          },
+          "answeredAt": 1772117983049
+        },
+        {
+          "id": "q_hlc89y1z",
+          "type": "pick_one",
+          "text": "Which Linux file manager integration should v1 prioritize?",
+          "config": {
+            "question": "Which Linux file manager integration should v1 prioritize?",
+            "options": [
+              {
+                "id": "xdg_open_only",
+                "label": "Use xdg-open and URI launching only",
+                "description": "Open files/folders in default apps/file manager; minimal integration"
+              },
+              {
+                "id": "open_containing_folder",
+                "label": "Add “Show in File Manager” for common managers",
+                "description": "Support Nautilus, Dolphin, Nemo, Thunar with best-effort commands"
+              },
+              {
+                "id": "context_menu",
+                "label": "Add .desktop + context menu actions",
+                "description": "Provide right-click actions (Open in Gallery Browser, Add to Collection)"
+              },
+              {
+                "id": "dbus_single_instance",
+                "label": "DBus single-instance + file manager hooks",
+                "description": "DBus service to open paths from managers and avoid duplicate instances"
+              }
+            ],
+            "recommended": "open_containing_folder",
+            "context": "[Linux desktop integration: MIME types, .desktop files, D-Bus]"
+          },
+          "answer": {
+            "selected": "open_containing_folder"
+          },
+          "answeredAt": 1772118192028
+        },
+        {
+          "id": "q_128h6q8c",
+          "type": "pick_one",
+          "text": "For v1 Linux integration, should we enforce single-instance behavior so file-manager opens reuse the existing window?",
+          "config": {
+            "question": "For v1 Linux integration, should we enforce single-instance behavior so file-manager opens reuse the existing window?",
+            "options": [
+              {
+                "id": "single_instance",
+                "label": "Yes, single instance (reuse existing window)",
+                "description": "File opens and requests are routed to the running app."
+              },
+              {
+                "id": "multi_instance",
+                "label": "No, allow multiple instances",
+                "description": "Each launch opens a new app instance."
+              }
+            ],
+            "recommended": "single_instance",
+            "context": "[Linux desktop integration: MIME types, .desktop files, D-Bus]"
+          },
+          "answer": {
+            "selected": "single_instance"
+          },
+          "answeredAt": 1772118260554
+        },
+        {
+          "id": "q_iarhbsvg",
+          "type": "pick_one",
+          "text": "For Linux desktop integration in v1 (beyond open-containing-folder + single-instance), should we also register MIME associations + a .desktop launcher?",
+          "config": {
+            "question": "For Linux desktop integration in v1 (beyond open-containing-folder + single-instance), should we also register MIME associations + a .desktop launcher?",
+            "options": [
+              {
+                "id": "yes_mime_desktop",
+                "label": "Yes, register MIME types and install a .desktop launcher"
+              },
+              {
+                "id": "desktop_only",
+                "label": ".desktop launcher only (no MIME associations)",
+                "description": "Keep file associations out of scope for v1"
+              },
+              {
+                "id": "no_extra",
+                "label": "No, keep integration limited to open-containing-folder + single-instance"
+              }
+            ],
+            "context": "[Linux desktop integration: MIME types, .desktop files, D-Bus]"
+          },
+          "answer": {
+            "selected": "no_extra"
+          },
+          "answeredAt": 1772118291809
+        }
+      ],
+      "finding": "For v1 Linux integration, prioritize open containing folder in the file manager and enforce single-instance behavior for file-manager launches; do not register extra MIME associations or a .desktop launcher."
+    },
+    "packaging": {
+      "id": "packaging",
+      "scope": "Distribution: pip, AppImage, Flatpak, system package",
+      "status": "done",
+      "questions": [
+        {
+          "id": "q_qagaxseb",
+          "type": "pick_one",
+          "text": "Primary distribution method?",
+          "config": {
+            "question": "Primary distribution method?",
+            "options": [
+              {
+                "label": "pip installable package",
+                "description": "Python standard, easy for devs",
+                "pros": [
+                  "Simple",
+                  "Cross-distro"
+                ],
+                "cons": [
+                  "Dependency hell"
+                ]
+              },
+              {
+                "label": "AppImage",
+                "description": "Single executable, works everywhere",
+                "pros": [
+                  "Portable",
+                  "Easy install"
+                ],
+                "cons": [
+                  "Large file"
+                ]
+              },
+              {
+                "label": "Flatpak",
+                "description": "Sandboxed, modern Linux standard",
+                "pros": [
+                  "Secure",
+                  "Auto-updates"
+                ],
+                "cons": [
+                  "Complex packaging"
+                ]
+              },
+              {
+                "label": "Native distro packages",
+                "description": "DEB, RPM for each distro",
+                "pros": [
+                  "Native"
+                ],
+                "cons": [
+                  "Maintenance burden"
+                ]
+              }
+            ]
+          },
+          "answer": {
+            "selected": "undefined"
+          },
+          "answeredAt": 1772117993978
+        },
+        {
+          "id": "q_2eji1j8s",
+          "type": "pick_one",
+          "text": "Which distribution target should we prioritize for v1?",
+          "config": {
+            "question": "Which distribution target should we prioritize for v1?",
+            "options": [
+              {
+                "id": "appimage",
+                "label": "AppImage",
+                "description": "Single portable binary; no sandbox"
+              },
+              {
+                "id": "flatpak",
+                "label": "Flatpak",
+                "description": "Sandboxed, good for desktop stores"
+              },
+              {
+                "id": "pip",
+                "label": "pip (source install)",
+                "description": "Developer-friendly; depends on system libs"
+              },
+              {
+                "id": "deb_rpm",
+                "label": "System package (deb/rpm)",
+                "description": "Native integration; more packaging work"
+              }
+            ],
+            "recommended": "appimage",
+            "context": "[Distribution: pip, AppImage, Flatpak, system package] Pick the primary packaging target for the initial release."
+          },
+          "answer": {
+            "selected": "flatpak"
+          },
+          "answeredAt": 1772118198176
+        }
+      ],
+      "finding": "Prioritize Flatpak as the primary distribution target for v1."
+    },
+    "performance": {
+      "id": "performance",
+      "scope": "Performance optimizations: lazy loading, virtual scrolling",
+      "status": "done",
+      "questions": [
+        {
+          "id": "q_9iibckhr",
+          "type": "pick_many",
+          "text": "Performance optimizations needed?",
+          "config": {
+            "question": "Performance optimizations needed?",
+            "options": [
+              {
+                "label": "Virtual scrolling for large folders",
+                "description": "Only render visible items",
+                "pros": [
+                  "Handles 10k+ files"
+                ],
+                "cons": [
+                  "Complex"
+                ]
+              },
+              {
+                "label": "Lazy thumbnail loading",
+                "description": "Load thumbs as they come into view",
+                "pros": [
+                  "Fast initial load"
+                ],
+                "cons": [
+                  "Scroll lag"
+                ]
+              },
+              {
+                "label": "Database indexing",
+                "description": "Proper indexes for fast queries",
+                "pros": [
+                  "Instant search"
+                ],
+                "cons": [
+                  "Larger DB"
+                ]
+              },
+              {
+                "label": "Async file operations",
+                "description": "Non-blocking copy/move",
+                "pros": [
+                  "Responsive UI"
+                ],
+                "cons": [
+                  "Complex state management"
+                ]
+              }
+            ]
+          },
+          "answer": {
+            "selected": [
+              "undefined",
+              "undefined",
+              "undefined",
+              "undefined"
+            ]
+          },
+          "answeredAt": 1772118016756
+        },
+        {
+          "id": "q_77s13s2l",
+          "type": "pick_many",
+          "text": "Which performance optimizations should be in v1?",
+          "config": {
+            "question": "Which performance optimizations should be in v1?",
+            "options": [
+              {
+                "id": "lazy_thumb",
+                "label": "Lazy thumbnail generation on scroll/visibility"
+              },
+              {
+                "id": "virtual_grid",
+                "label": "Virtualized grid/list (view recycling)"
+              },
+              {
+                "id": "async_io",
+                "label": "Async file I/O + metadata fetch in worker threads"
+              },
+              {
+                "id": "preview_cache",
+                "label": "Preview frame caching with size limits"
+              },
+              {
+                "id": "db_index",
+                "label": "SQLite indices + bulk queries"
+              },
+              {
+                "id": "bg_prefetch",
+                "label": "Background prefetch next/nearby items"
+              },
+              {
+                "id": "gpu_scale",
+                "label": "GPU-accelerated scaling/decoding where possible"
+              },
+              {
+                "id": "startup_cache",
+                "label": "Warm cache on startup for last directory"
+              }
+            ],
+            "min": 1,
+            "max": 4,
+            "context": "[Performance optimizations: lazy loading, virtual scrolling] Pick top priorities for launch to keep scope reasonable."
+          },
+          "answer": {
+            "selected": [
+              "lazy_thumb",
+              "virtual_grid",
+              "async_io",
+              "preview_cache",
+              "db_index",
+              "bg_prefetch",
+              "gpu_scale",
+              "startup_cache"
+            ]
+          },
+          "answeredAt": 1772118209653
+        }
+      ],
+      "finding": "For v1 performance, include lazy thumbnail loading, virtualized grid/list rendering, async I/O, preview caching, indexed DB queries, background prefetching, GPU-accelerated scaling where possible, and a startup cache for fast initial load."
+    }
+  },
+  "branch_order": [
+    "architecture",
+    "database",
+    "preview",
+    "thumbnails",
+    "file_ops",
+    "comfyui",
+    "ui_layout",
+    "features",
+    "linux_integration",
+    "packaging",
+    "performance"
+  ]
+}

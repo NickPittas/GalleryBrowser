@@ -1,0 +1,175 @@
+app-id: io.github.nickpittas.GalleryBrowser
+runtime: org.kde.Platform
+runtime-version: '6.10'
+sdk: org.kde.Sdk
+base: com.riverbankcomputing.PyQt.BaseApp
+base-version: '6.10'
+command: gallerybrowser
+finish-args:
+  # X11 + Wayland display access
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --socket=fallback-x11
+  # GPU acceleration
+  - --device=dri
+  # Audio playback (PulseAudio)
+  - --socket=pulseaudio
+  # Filesystem access for browsing media
+  - --filesystem=home
+  - --filesystem=/mnt
+  - --filesystem=/media
+  - --filesystem=/run/media
+  # For drag-and-drop / file manager integration
+  - --talk-name=org.freedesktop.FileManager1
+  # For trash support
+  - --talk-name=org.freedesktop.portal.Trash
+  # Portal access
+  - --talk-name=org.freedesktop.portal.Desktop
+  - --talk-name=org.freedesktop.portal.FileChooser
+  # DBus for single-instance check
+  - --talk-name=org.freedesktop.DBus
+
+cleanup-commands:
+  - /app/cleanup-BaseApp.sh
+
+modules:
+  # ── PyGObject (for GStreamer Python bindings) ──────────────────────
+  - name: pycairo
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://github.com/pygobject/pycairo/releases/download/v1.28.0/pycairo-1.28.0.tar.gz
+        sha256: 26ec5c6126781eb167089a123919f87baa2740da2cca9098be8b3a6b91cc5fbc
+
+  - name: pygobject
+    buildsystem: meson
+    sources:
+      - type: archive
+        url: https://download.gnome.org/sources/pygobject/3.54/pygobject-3.54.5.tar.gz
+        sha256: b6656f6348f5245606cf15ea48c384c7f05156c75ead206c1b246c80a22fb585
+
+  # ── Python dependencies (all from pre-built wheels) ────────────────
+  - name: python3-dependencies
+    buildsystem: simple
+    build-commands:
+      - pip3 install --verbose --no-index --find-links="file://${PWD}"
+        --prefix=${FLATPAK_DEST} --no-build-isolation --no-deps
+        greenlet==3.3.2
+        six==1.16.0
+        pypng==0.0.21
+        antlr4-python3-runtime==4.13.1
+        SQLAlchemy==2.0.47
+        alembic==1.18.4
+        Pillow==11.2.1
+        numpy==2.4.2
+        imageio==2.37.2
+        imageio-ffmpeg==0.6.0
+        pymediainfo==7.0.1
+        python-magic==0.4.27
+        appdirs==1.4.4
+        python-dateutil==2.9.0.post0
+        QtPy==2.4.3
+        QtAwesome==1.4.1
+        fileseq==3.0.0
+        OpenImageIO==3.1.10.0
+    sources:
+      # greenlet (C extension - cp313 manylinux wheel)
+      - type: file
+        url: https://files.pythonhosted.org/packages/7a/34/259b28ea7a2a0c904b11cd36c79b8cef8019b26ee5dbe24e73b469dea347/greenlet-3.3.2-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl
+        sha256: b6997d360a4e6a4e936c0f9625b1c20416b8a0ea18a8e19cabbefc712e7397ab
+      # six
+      - type: file
+        url: https://files.pythonhosted.org/packages/d9/5a/e7c31adbe875f2abbb91bd84cf2dc52d792b5a01506781dbcf25c91daf11/six-1.16.0-py2.py3-none-any.whl
+        sha256: 8abb2f1d86890a2dfb989f9a77cfcfd3e47c2a354b01111771326f8aa26e0254
+      # pypng
+      - type: file
+        url: https://files.pythonhosted.org/packages/ac/56/8b9d4ba9290bb6bd0b0824fd6f4ce8a852126f203f3edcef8b7abfbd8937/pypng-0.0.21-py3-none-any.whl
+        sha256: 76f8a1539ec56451da7ab7121f12a361969fe0f2d48d703d198ce2a99d6c5afd
+      # antlr4-python3-runtime
+      - type: file
+        url: https://files.pythonhosted.org/packages/57/09/0c2874e3e8c53250b40afa7399c70acf7d23cac80138f1792ea3797f7452/antlr4_python3_runtime-4.13.1-py3-none-any.whl
+        sha256: 78ec57aad12c97ac039ca27403ad61cb98aaec8a3f9bb8144f889aa0fa28b943
+      # SQLAlchemy (C extension - cp313 manylinux wheel)
+      - type: file
+        url: https://files.pythonhosted.org/packages/91/b1/bd793ddb34345d1ed43b13ab2d88c95d7d4eb2e28f5b5a99128b9cc2bca2/sqlalchemy-2.0.47-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+        sha256: a0bbc72e6a177c78d724f9106aaddc0d26a2ada89c6332b5935414eccf04cbd5
+      # alembic
+      - type: file
+        url: https://files.pythonhosted.org/packages/d2/29/6533c317b74f707ea28f8d633734dbda2119bbadfc61b2f3640ba835d0f7/alembic-1.18.4-py3-none-any.whl
+        sha256: a5ed4adcf6d8a4cb575f3d759f071b03cd6e5c7618eb796cb52497be25bfe19a
+      # Pillow (C extension - cp313 manylinux wheel)
+      - type: file
+        url: https://files.pythonhosted.org/packages/69/5f/cbe509c0ddf91cc3a03bbacf40e5c2339c4912d16458fcb797bb47bcb269/pillow-11.2.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+        sha256: d189ba1bebfbc0c0e529159631ec72bb9e9bc041f01ec6d3233d6d82eb823bc1
+      # numpy (C extension - cp313 manylinux wheel)
+      - type: file
+        url: https://files.pythonhosted.org/packages/04/dc/46066ce18d01645541f0186877377b9371b8fa8017fa8262002b4ef22612/numpy-2.4.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+        sha256: d0d9b7c93578baafcbc5f0b83eaf17b79d345c6f36917ba0c67f45226911d499
+      # imageio
+      - type: file
+        url: https://files.pythonhosted.org/packages/fb/fe/301e0936b79bcab4cacc7548bf2853fc28dced0a578bab1f7ef53c9aa75b/imageio-2.37.2-py3-none-any.whl
+        sha256: ad9adfb20335d718c03de457358ed69f141021a333c40a53e57273d8a5bd0b9b
+      # imageio-ffmpeg (bundled ffmpeg binary - manylinux wheel)
+      - type: file
+        url: https://files.pythonhosted.org/packages/a0/2d/43c8522a2038e9d0e7dbdf3a61195ecc31ca576fb1527a528c877e87d973/imageio_ffmpeg-0.6.0-py3-none-manylinux2014_x86_64.whl
+        sha256: c7e46fcec401dd990405049d2e2f475e2b397779df2519b544b8aab515195282
+      # pymediainfo (bundled libmediainfo - manylinux wheel)
+      - type: file
+        url: https://files.pythonhosted.org/packages/02/10/a9bc1446a48d3a15940eb1af79a71978f368f27e2cc86f9ec3ec2d206a20/pymediainfo-7.0.1-py3-none-manylinux_2_27_x86_64.whl
+        sha256: cde98112f1ce486589b17a12e5da42085faea996224f7c67fa45b8c1dca719c6
+      # python-magic
+      - type: file
+        url: https://files.pythonhosted.org/packages/6c/73/9f872cb81fc5c3bb48f7227872c28975f998f3e7c2b1c16e95e6432bbb90/python_magic-0.4.27-py2.py3-none-any.whl
+        sha256: c212960ad306f700aa0d01e5d7a325d20548ff97eb9920dcd29513174f0294d3
+      # appdirs
+      - type: file
+        url: https://files.pythonhosted.org/packages/3b/00/2344469e2084fb287c2e0b57b72910309874c3245463acd6cf5e3db69324/appdirs-1.4.4-py2.py3-none-any.whl
+        sha256: a841dacd6b99318a741b166adb07e19ee71a274450e68237b4650ca1055ab128
+      # python-dateutil
+      - type: file
+        url: https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl
+        sha256: a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
+      # QtPy
+      - type: file
+        url: https://files.pythonhosted.org/packages/69/76/37c0ccd5ab968a6a438f9c623aeecc84c202ab2fabc6a8fd927580c15b5a/QtPy-2.4.3-py3-none-any.whl
+        sha256: 72095afe13673e017946cc258b8d5da43314197b741ed2890e563cf384b51aa1
+      # QtAwesome
+      - type: file
+        url: https://files.pythonhosted.org/packages/11/ef/b7c8c38d1717e2fcb777678ed11568b31062e34550e23297cc32e9e1105e/qtawesome-1.4.1-py3-none-any.whl
+        sha256: 6a45f0ec214e0cd7c9c867772ec596799dcd5fae00a4b17717ff0d95d2e3fb64
+      # fileseq
+      - type: file
+        url: https://files.pythonhosted.org/packages/75/66/b1d55168750b26f58fa6204ce8422ba5dd96e0a3ab1dbd35683ee0205ed7/fileseq-3.0.0-py3-none-any.whl
+        sha256: daa309d327bebc50cbf8a816e012d811065cfb3eba956ec03cb7fb4471562c62
+      # OpenImageIO (bundled OIIO libs - cp313 manylinux wheel)
+      - type: file
+        url: https://files.pythonhosted.org/packages/ee/e6/92c34a5917586917cbf26520378509f9ecb84f31b644d0f6d7367f5cfba8/openimageio-3.1.10.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+        sha256: d26fd7a01ca53105f6391ce9ab7c34c9e32b8ad4b2ef03f69915ea7dc9821002
+
+  # ── GalleryBrowser application ─────────────────────────────────────
+  - name: gallerybrowser
+    buildsystem: simple
+    build-commands:
+      - pip3 install --verbose --no-index --find-links="file://${PWD}"
+        --prefix=${FLATPAK_DEST} --no-build-isolation --no-deps .
+      # Install desktop file
+      - install -Dm644 flatpak/io.github.nickpittas.GalleryBrowser.desktop
+        ${FLATPAK_DEST}/share/applications/io.github.nickpittas.GalleryBrowser.desktop
+      # Install metainfo
+      - install -Dm644 flatpak/io.github.nickpittas.GalleryBrowser.metainfo.xml
+        ${FLATPAK_DEST}/share/metainfo/io.github.nickpittas.GalleryBrowser.metainfo.xml
+      # Install icon (scalable SVG)
+      - install -Dm644 flatpak/io.github.nickpittas.GalleryBrowser.svg
+        ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.nickpittas.GalleryBrowser.svg
+    sources:
+      - type: dir
+        path: ..
+        skip:
+          - venv
+          - .flatpak-builder
+          - flatpak/build-dir
+          - __pycache__
+          - "*.pyc"
+          - .ruff_cache
+          - "*.egg-info"

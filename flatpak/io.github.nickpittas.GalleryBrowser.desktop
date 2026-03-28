@@ -1,0 +1,12 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Type=Application
+Name=GalleryBrowser
+Comment=Linux-native asset management application for images and videos
+Exec=gallerybrowser
+Icon=io.github.nickpittas.GalleryBrowser
+Terminal=false
+Categories=Graphics;Viewer;Photography;
+MimeType=image/jpeg;image/png;image/tiff;image/bmp;image/gif;image/webp;image/x-exr;video/mp4;video/quicktime;video/x-msvideo;video/x-matroska;
+Keywords=gallery;browser;image;video;asset;viewer;exr;sequence;
+StartupNotify=true

@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gallerybrowser"
+version = "0.1.0"
+description = "Linux-native asset management application for images and videos"
+readme = "README.md"
+license = "MIT"
+authors = [
+    {name = "Nick Pittas", email = "nick@example.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics :: Viewers",
+    "Topic :: Multimedia :: Video :: Display",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "PyQt6>=6.5.0",
+    "SQLAlchemy>=2.0.0",
+    "alembic>=1.12.0",
+    "Pillow>=10.0.0",
+    "imageio>=2.31.0",
+    "imageio-ffmpeg>=0.4.8",
+    "pymediainfo>=6.0.0",
+    "python-magic>=0.4.27",
+    "PyGObject>=3.44.0",
+    "appdirs>=1.4.4",
+    "python-dateutil>=2.8.0",
+    "qtawesome>=1.4.0",
+    "fileseq>=2.0.0",
+    "numpy>=1.24.0",
+    "openimageio>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-qt>=4.2.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+gallerybrowser = "gallerybrowser.__main__:main"
+
+[project.gui-scripts]
+gallerybrowser-gui = "gallerybrowser.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+include = '\.pyi?$'
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+qt_api = "pyqt6"
+testpaths = ["tests"]

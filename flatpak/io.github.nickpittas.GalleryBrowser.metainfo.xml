@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.nickpittas.GalleryBrowser</id>
+
+  <name>GalleryBrowser</name>
+  <summary>Linux-native asset management for images and videos</summary>
+
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+
+  <description>
+    <p>
+      GalleryBrowser is a Linux-native gallery and asset browser for managing
+      images and video files. It supports browsing, previewing, and organizing
+      media assets including EXR image sequences, MOV/MP4 video files, and
+      common image formats.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Browse and preview images and videos in a modern dark interface</li>
+      <li>EXR image sequence playback with RAM preview</li>
+      <li>Video scrubbing and frame stepping for MOV, MP4, and other formats</li>
+      <li>Drag-and-drop file management with copy and move support</li>
+      <li>Batch rename with chainable operations and live preview</li>
+      <li>Favorites and recent folders for quick navigation</li>
+      <li>Tag-based asset organization</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.nickpittas.GalleryBrowser.desktop</launchable>
+
+  <url type="homepage">https://github.com/nickpittas/GalleryBrowser</url>
+  <url type="bugtracker">https://github.com/nickpittas/GalleryBrowser/issues</url>
+
+  <provides>
+    <binary>gallerybrowser</binary>
+  </provides>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.1.0" date="2026-02-27">
+      <description>
+        <p>Initial release with core gallery browsing, preview, and file management features.</p>
+      </description>
+    </release>
+  </releases>
+</component>

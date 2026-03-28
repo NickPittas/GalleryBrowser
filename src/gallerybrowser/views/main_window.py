@@ -1,0 +1,762 @@
+"""Main window with 3-pane layout and modern styling."""
+
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QAction, QIcon, QKeyEvent, QKeySequence
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenuBar,
+    QMessageBox,
+    QSizePolicy,
+    QSlider,
+    QSplitter,
+    QStatusBar,
+    QTabWidget,
+    QToolBar,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+import qtawesome as qta
+
+from gallerybrowser.views.batch_rename_dialog import BatchRenameDialog
+from gallerybrowser.views.file_pane import FilePane
+from gallerybrowser.views.info_pane import InfoPane
+from gallerybrowser.views.preview_pane import PreviewPane
+from gallerybrowser.views.settings_dialog import SettingsDialog
+from gallerybrowser.views.tags_panel import TagsPanel
+from gallerybrowser.views.tree_pane import TreePane
+from gallerybrowser.core.file_manager import FileManager
+from gallerybrowser.config import Config
+
+
+class MainWindow(QWidget):
+    """Main window content with 3-pane layout."""
+
+    def __init__(self):
+        super().__init__()
+        self.current_path = ""
+        self.clipboard = []  # List of (file_path, operation_type) tuples
+        self.file_manager = FileManager()
+        self.setup_ui()
+        self.setup_menu()
+        self.connect_actions()
+        self.load_tags()
+        self._apply_saved_settings()
+
+    def setup_ui(self):
+        """Set up the user interface."""
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Create main splitter with three panes
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.setHandleWidth(2)
+        self.main_splitter.setChildrenCollapsible(True)
+
+        # Left pane: Tabs for Tree and Tags
+        self.left_tabs = QTabWidget()
+        self.left_tabs.setMinimumWidth(200)
+        self.left_tabs.setMaximumWidth(400)
+
+        # Tree tab
+        self.tree_pane = TreePane()
+        self.tree_pane.folder_selected.connect(self.on_folder_selected)
+        self.tree_pane.files_dropped.connect(self.on_files_dropped)
+        self.left_tabs.addTab(self.tree_pane, "Folders")
+
+        # Tags tab
+        self.tags_panel = TagsPanel()
+        self.tags_panel.tag_selected.connect(self.on_tag_selected)
+        self.left_tabs.addTab(self.tags_panel, "Tags")
+
+        self.main_splitter.addWidget(self.left_tabs)
+
+        # Center pane: File view
+        self.file_pane = FilePane()
+        self.file_pane.file_selected.connect(self.on_file_selected)
+        self.file_pane.setMinimumWidth(300)
+        self.main_splitter.addWidget(self.file_pane)
+
+        # Right pane: Preview and info (nested splitter)
+        self.right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.right_splitter.setHandleWidth(2)
+
+        self.preview_pane = PreviewPane()
+        self.preview_pane.setMinimumHeight(200)
+        self.right_splitter.addWidget(self.preview_pane)
+
+        self.info_pane = InfoPane()
+        self.info_pane.setMinimumHeight(150)
+        self.right_splitter.addWidget(self.info_pane)
+
+        self.right_splitter.setSizes([400, 300])
+        self.right_splitter.setStretchFactor(0, 2)
+        self.right_splitter.setStretchFactor(1, 1)
+
+        self.right_widget = QWidget()
+        right_layout = QVBoxLayout(self.right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.addWidget(self.right_splitter)
+
+        self.right_widget.setMinimumWidth(250)
+        self.right_widget.setMaximumWidth(500)
+        self.main_splitter.addWidget(self.right_widget)
+
+        # Set initial splitter sizes (20%, 50%, 30%)
+        self.main_splitter.setSizes([250, 650, 300])
+        self.main_splitter.setStretchFactor(0, 0)
+        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setStretchFactor(2, 0)
+
+        # Add toolbar before the main splitter
+        self.setup_toolbar()
+        layout.addWidget(self.toolbar)
+
+        layout.addWidget(self.main_splitter)
+
+        # Create status bar
+        self.status_bar = self.create_status_bar()
+        layout.addWidget(self.status_bar)
+
+    def setup_toolbar(self):
+        """Create the main toolbar with icons."""
+        self.toolbar = QToolBar()
+        self.toolbar.setMovable(False)
+        self.toolbar.setIconSize(QSize(24, 24))
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+
+        # File operations
+        self.action_new_folder = QAction(
+            qta.icon("fa5s.folder-plus", color="#a0a0a0"), "New Folder", self
+        )
+        self.action_new_folder.setShortcut(QKeySequence("Ctrl+Shift+N"))
+        self.action_new_folder.setToolTip("Create new folder (Ctrl+Shift+N)")
+        self.toolbar.addAction(self.action_new_folder)
+
+        self.toolbar.addSeparator()
+
+        self.action_copy = QAction(qta.icon("fa5s.copy", color="#a0a0a0"), "Copy", self)
+        self.action_copy.setShortcut(QKeySequence("Ctrl+C"))
+        self.action_copy.setToolTip("Copy selected items (Ctrl+C)")
+        self.toolbar.addAction(self.action_copy)
+
+        self.action_cut = QAction(qta.icon("fa5s.cut", color="#a0a0a0"), "Cut", self)
+        self.action_cut.setShortcut(QKeySequence("Ctrl+X"))
+        self.action_cut.setToolTip("Cut selected items (Ctrl+X)")
+        self.toolbar.addAction(self.action_cut)
+
+        self.action_paste = QAction(qta.icon("fa5s.paste", color="#a0a0a0"), "Paste", self)
+        self.action_paste.setShortcut(QKeySequence("Ctrl+V"))
+        self.action_paste.setToolTip("Paste items (Ctrl+V)")
+        self.toolbar.addAction(self.action_paste)
+
+        self.toolbar.addSeparator()
+
+        self.action_delete = QAction(qta.icon("fa5s.trash-alt", color="#a0a0a0"), "Delete", self)
+        self.action_delete.setShortcut(QKeySequence("Delete"))
+        self.action_delete.setToolTip("Move to trash (Del)")
+        self.toolbar.addAction(self.action_delete)
+
+        self.action_rename = QAction(qta.icon("fa5s.edit", color="#a0a0a0"), "Rename", self)
+        self.action_rename.setShortcut(QKeySequence("F2"))
+        self.action_rename.setToolTip("Rename selected item (F2)")
+        self.toolbar.addAction(self.action_rename)
+
+        self.action_refresh = QAction(qta.icon("fa5s.sync-alt", color="#a0a0a0"), "Refresh", self)
+        self.action_refresh.setShortcut(QKeySequence("F5"))
+        self.action_refresh.setToolTip("Refresh current folder (F5)")
+        self.toolbar.addAction(self.action_refresh)
+
+        self.toolbar.addSeparator()
+
+        # View controls
+        self.action_grid_view = QAction(
+            qta.icon("fa5s.th-large", color="#2196F3"), "Grid View", self
+        )
+        self.action_grid_view.setCheckable(True)
+        self.action_grid_view.setChecked(True)
+        self.action_grid_view.setToolTip("Grid view")
+        self.action_grid_view.triggered.connect(self.on_grid_view)
+        self.toolbar.addAction(self.action_grid_view)
+
+        self.action_list_view = QAction(qta.icon("fa5s.list", color="#a0a0a0"), "List View", self)
+        self.action_list_view.setCheckable(True)
+        self.action_list_view.setToolTip("List view")
+        self.action_list_view.triggered.connect(self.on_list_view)
+        self.toolbar.addAction(self.action_list_view)
+
+        # Sort dropdown
+        sort_widget = QWidget()
+        sort_layout = QHBoxLayout(sort_widget)
+        sort_layout.setContentsMargins(8, 0, 0, 0)
+        sort_layout.setSpacing(4)
+
+        sort_label = QLabel("Sort:")
+        sort_label.setStyleSheet("color: #a0a0a0;")
+        sort_layout.addWidget(sort_label)
+
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(["Name", "Size", "Date", "Type"])
+        self.sort_combo.setFixedWidth(80)
+        self.sort_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #252525;
+                border: 1px solid #2a2a2a;
+                border-radius: 4px;
+                padding: 4px 8px;
+                color: #e8e8e8;
+                font-size: 12px;
+            }
+            QComboBox:hover {
+                border: 1px solid #3a3a3a;
+                background-color: #2c2c2c;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 16px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #252525;
+                color: #e8e8e8;
+                border: 1px solid #2a2a2a;
+                border-radius: 4px;
+                padding: 4px;
+                selection-background-color: #2196F3;
+                selection-color: #ffffff;
+            }
+        """)
+        self.sort_combo.currentTextChanged.connect(self.on_sort_changed)
+        sort_layout.addWidget(self.sort_combo)
+
+        # Sort order toggle
+        self.action_sort_asc = QAction(
+            qta.icon("fa5s.sort-alpha-down", color="#a0a0a0"), "Ascending", self
+        )
+        self.action_sort_asc.setCheckable(True)
+        self.action_sort_asc.setChecked(True)
+        self.action_sort_asc.triggered.connect(self.on_sort_order_changed)
+        self.toolbar.addAction(self.action_sort_asc)
+
+        self.toolbar.addWidget(sort_widget)
+
+        self.toolbar.addSeparator()
+
+        # Filter by type
+        filter_widget = QWidget()
+        filter_layout = QHBoxLayout(filter_widget)
+        filter_layout.setContentsMargins(8, 0, 0, 0)
+        filter_layout.setSpacing(4)
+
+        filter_label = QLabel("Show:")
+        filter_label.setStyleSheet("color: #a0a0a0;")
+        filter_layout.addWidget(filter_label)
+
+        self.filter_combo = QComboBox()
+        self.filter_combo.addItems(["All", "Images", "Videos", "Sequences"])
+        self.filter_combo.setFixedWidth(80)
+        self.filter_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #252525;
+                border: 1px solid #2a2a2a;
+                border-radius: 4px;
+                padding: 4px 8px;
+                color: #e8e8e8;
+                font-size: 12px;
+            }
+            QComboBox:hover {
+                border: 1px solid #3a3a3a;
+                background-color: #2c2c2c;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 16px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #252525;
+                color: #e8e8e8;
+                border: 1px solid #2a2a2a;
+                border-radius: 4px;
+                padding: 4px;
+                selection-background-color: #2196F3;
+                selection-color: #ffffff;
+            }
+        """)
+        self.filter_combo.currentTextChanged.connect(self.on_filter_changed)
+        filter_layout.addWidget(self.filter_combo)
+
+        self.toolbar.addWidget(filter_widget)
+
+        self.toolbar.addSeparator()
+
+        # Sequence collapse toggle
+        self.action_collapse_sequences = QAction(
+            qta.icon("fa5s.layer-group", color="#a0a0a0"), "Collapse Sequences", self
+        )
+        self.action_collapse_sequences.setCheckable(True)
+        self.action_collapse_sequences.setChecked(True)
+        self.action_collapse_sequences.setToolTip("Collapse image sequences into single entries")
+        self.action_collapse_sequences.triggered.connect(self.on_collapse_sequences_toggled)
+        self.toolbar.addAction(self.action_collapse_sequences)
+
+        self.toolbar.addSeparator()
+
+        # Thumbnail size slider
+        size_widget = QWidget()
+        size_layout = QHBoxLayout(size_widget)
+        size_layout.setContentsMargins(0, 0, 0, 0)
+        size_layout.setSpacing(8)
+
+        size_icon = QLabel()
+        size_icon.setPixmap(qta.icon("fa5s.image", color="#666666").pixmap(16, 16))
+        size_layout.addWidget(size_icon)
+
+        self.size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.size_slider.setMinimum(64)
+        self.size_slider.setMaximum(512)
+        self.size_slider.setValue(128)
+        self.size_slider.setFixedWidth(120)
+        self.size_slider.setToolTip("Thumbnail size")
+        self.size_slider.valueChanged.connect(self.on_thumbnail_size_changed)
+        size_layout.addWidget(self.size_slider)
+
+        self.toolbar.addWidget(size_widget)
+
+        self.toolbar.addSeparator()
+
+        # Search
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search files...")
+        self.search_edit.setFixedWidth(200)
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.textChanged.connect(self.on_search_text_changed)
+        self.toolbar.addWidget(self.search_edit)
+
+        self.toolbar.addSeparator()
+
+        # Toggle preview pane
+        self.action_toggle_preview = QAction(
+            qta.icon("fa5s.eye", color="#a0a0a0"), "Toggle Preview", self
+        )
+        self.action_toggle_preview.setCheckable(True)
+        self.action_toggle_preview.setChecked(True)
+        self.action_toggle_preview.setToolTip("Show/hide preview pane")
+        self.action_toggle_preview.triggered.connect(self.toggle_preview_pane)
+        self.toolbar.addAction(self.action_toggle_preview)
+
+        # Settings
+        self.action_settings = QAction(qta.icon("fa5s.cog", color="#a0a0a0"), "Settings", self)
+        self.action_settings.setToolTip("Settings")
+        self.action_settings.triggered.connect(self.on_settings)
+        self.toolbar.addAction(self.action_settings)
+
+        # Batch rename
+        self.action_batch_rename = QAction(
+            qta.icon("fa5s.edit", color="#a0a0a0"), "Batch Rename", self
+        )
+        self.action_batch_rename.setToolTip("Batch rename selected files")
+        self.action_batch_rename.triggered.connect(self.on_batch_rename)
+        self.toolbar.addAction(self.action_batch_rename)
+
+        # Add spacer to push remaining items to the right
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.toolbar.addWidget(spacer)
+
+    def setup_menu(self):
+        """Set up the menu bar."""
+        # Note: Menu bar is added by QMainWindow, not in this widget
+        pass
+
+    def connect_actions(self):
+        """Connect toolbar actions to handlers."""
+        # File operations
+        self.action_copy.triggered.connect(self.on_copy)
+        self.action_cut.triggered.connect(self.on_cut)
+        self.action_paste.triggered.connect(self.on_paste)
+        self.action_delete.triggered.connect(self.on_delete)
+        self.action_rename.triggered.connect(self.on_rename)
+        self.action_refresh.triggered.connect(self.on_refresh)
+
+        # Connect file manager signals
+        self.file_manager.operation_completed.connect(self.on_operation_completed)
+        self.file_manager.operation_failed.connect(self.on_operation_failed)
+
+        # Connect file pane selection changes
+        self.file_pane.files_selected.connect(self.on_files_selected)
+
+        # Connect file pane context menu actions
+        self.file_pane.action_open.connect(self._on_ctx_open)
+        self.file_pane.action_cut.connect(lambda _: self.on_cut())
+        self.file_pane.action_copy.connect(lambda _: self.on_copy())
+        self.file_pane.action_rename.connect(lambda _: self.on_rename())
+        self.file_pane.action_batch_rename.connect(lambda _: self.on_batch_rename())
+        self.file_pane.action_delete.connect(lambda _: self.on_delete())
+        self.file_pane.action_add_favorite.connect(self._on_add_favorite_from_ctx)
+
+    def on_copy(self):
+        """Copy selected files to clipboard."""
+        selected = self.file_pane.get_selected_files()
+        if selected:
+            self.clipboard = [(path, "copy") for path in selected]
+            self.status_bar.showMessage(f"Copied {len(selected)} item(s) to clipboard", 2000)
+
+    def on_cut(self):
+        """Cut selected files to clipboard."""
+        selected = self.file_pane.get_selected_files()
+        if selected:
+            self.clipboard = [(path, "cut") for path in selected]
+            self.status_bar.showMessage(f"Cut {len(selected)} item(s) to clipboard", 2000)
+
+    def on_paste(self):
+        """Paste files from clipboard to current folder."""
+        if not self.clipboard or not self.current_path:
+            return
+
+        from pathlib import Path
+
+        dest_folder = Path(self.current_path)
+
+        for file_path, operation in self.clipboard:
+            source = Path(file_path)
+            dest = dest_folder / source.name
+
+            # Handle duplicate names
+            counter = 1
+            original_dest = dest
+            while dest.exists():
+                stem = original_dest.stem
+                suffix = original_dest.suffix
+                dest = dest_folder / f"{stem} ({counter}){suffix}"
+                counter += 1
+
+            if operation == "copy":
+                self.file_manager.copy(str(source), str(dest))
+            else:  # cut
+                self.file_manager.move(str(source), str(dest))
+
+        # Clear clipboard if it was a cut operation
+        if self.clipboard and self.clipboard[0][1] == "cut":
+            self.clipboard.clear()
+
+        # Refresh the view
+        self.file_pane.set_folder(self.current_path)
+
+    def on_delete(self):
+        """Delete selected files (with confirmation)."""
+        selected = self.file_pane.get_selected_files()
+        if selected:
+            count = len(selected)
+            reply = QMessageBox.question(
+                self,
+                "Confirm Delete",
+                f"Move {count} item{'s' if count > 1 else ''} to trash?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                for file_path in selected:
+                    self.file_manager.delete(file_path, use_trash=True)
+                self.file_pane.set_folder(self.current_path)
+
+    def on_rename(self):
+        """Rename selected file."""
+        selected = self.file_pane.get_selected_files()
+        if len(selected) == 1:
+            # Show rename dialog for single file
+            from PyQt6.QtWidgets import QInputDialog
+            from pathlib import Path
+
+            file_path = selected[0]
+            current_name = Path(file_path).name
+
+            new_name, ok = QInputDialog.getText(self, "Rename", "New name:", text=current_name)
+
+            if ok and new_name and new_name != current_name:
+                self.file_manager.rename(file_path, new_name)
+                self.file_pane.set_folder(self.current_path)
+
+    def on_refresh(self):
+        """Refresh the current folder view."""
+        if self.current_path:
+            self.file_pane.set_folder(self.current_path)
+            self.update_status_count()
+
+    def _on_ctx_open(self, file_paths):
+        """Open files from context menu with default application."""
+        import subprocess
+
+        for fp in file_paths:
+            subprocess.Popen(["xdg-open", fp])
+
+    def _on_add_favorite_from_ctx(self, folder_path):
+        """Add a folder to favorites via context menu."""
+        from pathlib import Path
+
+        self.tree_pane.add_favorite(folder_path)
+        self.status_bar.showMessage(f"Added to favorites: {Path(folder_path).name}", 3000)
+
+    def on_files_selected(self, file_paths):
+        """Handle file selection changes."""
+        # Update action states based on selection
+        has_selection = len(file_paths) > 0
+        self.action_copy.setEnabled(has_selection)
+        self.action_cut.setEnabled(has_selection)
+        self.action_delete.setEnabled(has_selection)
+        self.action_rename.setEnabled(len(file_paths) == 1)
+        self.action_batch_rename.setEnabled(len(file_paths) > 1)
+
+        # Update status bar with selection info
+        from pathlib import Path
+
+        if len(file_paths) == 0:
+            self.update_status_count()
+        elif len(file_paths) == 1:
+            # Show file name for single selection
+            self.status_label.setText(f"Selected: {Path(file_paths[0]).name}")
+        else:
+            # Show count for multiple selection
+            total_size = 0
+            for path in file_paths:
+                try:
+                    total_size += Path(path).stat().st_size
+                except OSError:
+                    pass
+            size_str = self._format_size(total_size)
+            self.status_label.setText(f"Selected {len(file_paths)} items ({size_str})")
+
+    def _format_size(self, size_bytes):
+        """Format file size for display."""
+        for unit in ["B", "KB", "MB", "GB"]:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.1f} TB"
+
+    def on_operation_completed(self, message):
+        """Handle file operation completion."""
+        self.status_bar.showMessage(message, 3000)
+
+    def on_operation_failed(self, operation, error):
+        """Handle file operation failure."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        QMessageBox.critical(self, "Operation Failed", f"{operation}:\n{error}")
+
+    def create_status_bar(self) -> QStatusBar:
+        """Create the status bar."""
+        status_bar = QStatusBar()
+        status_bar.setFixedHeight(24)
+        status_bar.setSizeGripEnabled(False)
+
+        # Left side: Current path
+        self.path_label = QLabel("No folder selected")
+        self.path_label.setStyleSheet("padding: 0px; margin: 0px;")
+        status_bar.addWidget(self.path_label, stretch=1)
+
+        # Middle: Selection info
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("padding: 0px; margin: 0px; color: rgba(255,255,255,0.7);")
+        status_bar.addWidget(self.status_label)
+
+        # Right side: Item count
+        self.count_label = QLabel("0 items")
+        self.count_label.setStyleSheet("padding: 0px; margin: 0px;")
+        status_bar.addPermanentWidget(self.count_label)
+
+        return status_bar
+
+    def on_folder_selected(self, folder_path: str):
+        """Handle folder selection from tree pane."""
+        self.current_path = folder_path
+        self.file_pane.set_folder(folder_path)
+        self.path_label.setText(folder_path)
+        self.update_status_count()
+        # Track in recents
+        self.tree_pane.add_recent(folder_path)
+        # Sync tree view: expand filesystem tree to this folder
+        self.tree_pane.navigate_to_path(folder_path)
+
+    def on_files_dropped(self, target_folder: str, file_paths: list, is_copy: bool = False):
+        """Handle files dropped on tree item.
+
+        By default files are *moved*.  Hold Ctrl during drop to *copy*.
+        """
+        from pathlib import Path
+
+        target = Path(target_folder)
+        for file_path in file_paths:
+            source = Path(file_path)
+            dest = target / source.name
+
+            # Handle duplicate names
+            counter = 1
+            original_dest = dest
+            while dest.exists():
+                stem = original_dest.stem
+                suffix = original_dest.suffix
+                dest = target / f"{stem} ({counter}){suffix}"
+                counter += 1
+
+            if is_copy:
+                self.file_manager.copy(str(source), str(dest))
+            else:
+                self.file_manager.move(str(source), str(dest))
+
+        # Refresh views
+        if self.current_path == target_folder or (
+            not is_copy and self.current_path in {str(Path(p).parent) for p in file_paths}
+        ):
+            self.file_pane.set_folder(self.current_path)
+
+    def on_file_selected(self, file_path: str):
+        """Handle file selection from file pane."""
+        # Look up the full file_info dict so PreviewPane can detect sequences
+        file_info = None
+        for f in self.file_pane.filtered_files:
+            if f["path"] == file_path:
+                file_info = f
+                break
+        self.preview_pane.set_file(file_path, file_info=file_info)
+        self.info_pane.set_file(file_path)
+
+    def on_thumbnail_size_changed(self, value: int):
+        """Handle thumbnail size slider change."""
+        self.file_pane.set_thumbnail_size(value)
+
+    def toggle_preview_pane(self, checked: bool):
+        """Toggle visibility of the preview pane."""
+        self.right_widget.setVisible(checked)
+
+    def on_collapse_sequences_toggled(self, checked: bool):
+        """Toggle sequence collapsing in the file pane."""
+        self.file_pane.set_collapse_sequences(checked)
+        self.update_status_count()
+
+    def update_status_count(self):
+        """Update the status bar item count."""
+        files = self.file_pane.files
+        count = len(files)
+        seq_count = sum(1 for f in files if f.get("type") == "sequence")
+        if seq_count > 0:
+            label = f"{count} item{'s' if count != 1 else ''} ({seq_count} sequence{'s' if seq_count != 1 else ''})"
+        else:
+            label = f"{count} item{'s' if count != 1 else ''}"
+        self.count_label.setText(label)
+
+    def on_grid_view(self):
+        """Switch to grid view."""
+        self.file_pane.set_view_mode("grid")
+        self.action_grid_view.setChecked(True)
+        self.action_list_view.setChecked(False)
+
+    def on_list_view(self):
+        """Switch to list view."""
+        self.file_pane.set_view_mode("list")
+        self.action_grid_view.setChecked(False)
+        self.action_list_view.setChecked(True)
+
+    def on_search_text_changed(self, text: str):
+        """Handle search text change."""
+        self.file_pane.set_search_text(text)
+
+    def on_settings(self):
+        """Open settings dialog."""
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            settings = dialog.get_settings()
+            self._apply_settings(settings)
+            self.status_bar.showMessage("Settings saved", 3000)
+
+    def _apply_saved_settings(self):
+        """Load settings from disk and apply them at startup."""
+        settings = Config.load_settings()
+        self._apply_settings(settings)
+
+    def _apply_settings(self, settings: dict):
+        """Apply a settings dict to the running application."""
+        # Thumbnail size
+        thumb_size = settings.get("thumbnail_size", 128)
+        self.file_pane.set_thumbnail_size(thumb_size)
+        # Sync the toolbar slider
+        self.size_slider.blockSignals(True)
+        self.size_slider.setValue(thumb_size)
+        self.size_slider.blockSignals(False)
+
+        # RAM preview budget
+        ram_mb = settings.get("ram_preview_mb", 2048)
+        ram_bytes = ram_mb * 1024 * 1024
+        # Update the sequence player in the preview pane
+        seq_preview = getattr(self.preview_pane, "_sequence_preview", None)
+        if seq_preview is not None:
+            player = getattr(seq_preview, "_player", None)
+            if player is not None:
+                player.set_max_cache_bytes(ram_bytes)
+
+    def on_batch_rename(self):
+        """Open batch rename dialog."""
+        selected = self.file_pane.get_selected_files()
+        if len(selected) < 2:
+            from PyQt6.QtWidgets import QMessageBox
+
+            QMessageBox.information(
+                self, "Batch Rename", "Please select at least 2 files to batch rename."
+            )
+            return
+
+        dialog = BatchRenameDialog(selected, self)
+        if dialog.exec():
+            renames = dialog.get_renames()
+            for old_path, new_name in renames:
+                self.file_manager.rename(old_path, new_name)
+            self.file_pane.set_folder(self.current_path)
+            self.status_bar.showMessage(f"Renamed {len(renames)} files", 3000)
+
+    def on_tag_selected(self, tag_name: str):
+        """Handle tag selection - filter files by tag."""
+        # TODO: Filter files by tag from database
+        self.status_bar.showMessage(f"Filter by tag: {tag_name}", 3000)
+
+    def load_tags(self):
+        """Load tags from database."""
+        # TODO: Load from database
+        # For now, use sample tags
+        self.tags_panel.set_tags(["Favorites", "Work", "Personal", "Archive"])
+
+    def on_sort_changed(self, sort_by: str):
+        """Handle sort criteria change."""
+        self.file_pane.set_sort_by(sort_by.lower())
+
+    def on_sort_order_changed(self, ascending: bool):
+        """Handle sort order change."""
+        self.file_pane.set_sort_order(ascending)
+
+    def on_filter_changed(self, filter_text: str):
+        """Handle filter by type change."""
+        filter_map = {"All": "all", "Images": "image", "Videos": "video", "Sequences": "sequence"}
+        self.file_pane.set_filter_type(filter_map.get(filter_text, "all"))
+
+    def keyPressEvent(self, event: QKeyEvent):
+        """Handle global keyboard shortcuts."""
+        key = event.key()
+
+        # Frame stepping: comma = back, period = forward
+        if key in (Qt.Key.Key_Comma, Qt.Key.Key_Period):
+            direction = 1 if key == Qt.Key.Key_Period else -1
+            stack_idx = self.preview_pane._stack.currentIndex()
+            # Video preview (stack index 1)
+            if stack_idx == 1:
+                self.preview_pane._video_preview.step_frame(direction)
+                return
+            # Sequence preview (stack index 2)
+            if stack_idx == 2:
+                self.preview_pane._sequence_preview.step_frame(direction)
+                return
+
+        super().keyPressEvent(event)
