@@ -89,6 +89,18 @@ class TestConfig:
         assert MetadataExtractor._parse_frame_rate("0/0") is None
         assert MetadataExtractor._parse_frame_rate(None) is None
 
+    def test_single_instance_uses_cache_local_lock(self, monkeypatch, tmp_path):
+        """Single-instance locking should use the configured cache directory."""
+        from gallerybrowser.config import Config
+        from gallerybrowser.utils.single_instance import SingleInstance
+
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        monkeypatch.setattr(Config, "get_cache_dir", classmethod(lambda cls: cache_dir))
+
+        instance = SingleInstance()
+        assert Path(instance.lock_path).parent == cache_dir / "locks"
+
 
 class TestDatabase:
     """Test database functionality."""

@@ -632,8 +632,8 @@ class MainWindow(QWidget):
             return prefix
         return f"{prefix} [{', '.join(filters)}]"
 
-    def _apply_library_filters_to_folder(self, files: list[dict]) -> list[dict]:
-        """Apply DB-backed tag/collection/rating filters to folder scan results."""
+    def _collect_filtered_paths(self, folder_path: str | None = None) -> set[str] | None:
+        """Return the DB-backed file paths allowed by the active metadata filters."""
         allowed_paths = None
 
         def _intersect(paths: set[str]):
@@ -645,7 +645,7 @@ class MainWindow(QWidget):
                 {
                     file_record.path
                     for file_record in self.db.get_files_by_tag(
-                        self.query_state.selected_tag, folder_path=self.current_path
+                        self.query_state.selected_tag, folder_path=folder_path
                     )
                 }
             )
@@ -656,7 +656,7 @@ class MainWindow(QWidget):
                     file_record.path
                     for file_record in self.db.get_files_by_collection(
                         self.query_state.selected_collection,
-                        folder_path=self.current_path,
+                        folder_path=folder_path,
                     )
                 }
             )
@@ -664,8 +664,7 @@ class MainWindow(QWidget):
         if self.query_state.unrated_only:
             _intersect(
                 {
-                    file_record.path
-                    for file_record in self.db.get_unrated_files(folder_path=self.current_path)
+                    file_record.path for file_record in self.db.get_unrated_files(folder_path=folder_path)
                 }
             )
         elif self.query_state.selected_rating is not None:
@@ -674,33 +673,39 @@ class MainWindow(QWidget):
                     file_record.path
                     for file_record in self.db.get_files_by_rating(
                         self.query_state.selected_rating,
-                        folder_path=self.current_path,
+                        folder_path=folder_path,
                     )
                 }
             )
 
+        return allowed_paths
+
+    def _apply_library_filters_to_folder(self, files: list[dict]) -> list[dict]:
+        """Apply DB-backed tag/collection/rating filters to folder scan results."""
+        allowed_paths = self._collect_filtered_paths(folder_path=self.current_path)
         if allowed_paths is None:
             return files
         return [file_info for file_info in files if file_info["path"] in allowed_paths]
 
+    def _file_record_to_view_item(self, file_record) -> dict | None:
+        """Convert a DB file record into a FilePane view row."""
+        path_obj = Path(file_record.path)
+        if not path_obj.exists():
+            return None
+
+        modified = file_record.modified_at.timestamp() if file_record.modified_at else path_obj.stat().st_mtime
+        return {
+            "path": file_record.path,
+            "name": file_record.filename or path_obj.name,
+            "type": file_record.file_type or Config.get_file_type(file_record.path),
+            "size": file_record.size_bytes or path_obj.stat().st_size,
+            "modified": modified,
+        }
+
     def _build_library_results(self) -> list[dict]:
         """Build explicit library-wide result rows from DB-backed filters."""
         result_files = []
-        allowed_paths = None
-
-        def _intersect(file_records):
-            nonlocal allowed_paths
-            paths = {file_record.path for file_record in file_records}
-            allowed_paths = paths if allowed_paths is None else allowed_paths & paths
-
-        if self.query_state.selected_tag:
-            _intersect(self.db.get_files_by_tag(self.query_state.selected_tag))
-        if self.query_state.selected_collection:
-            _intersect(self.db.get_files_by_collection(self.query_state.selected_collection))
-        if self.query_state.unrated_only:
-            _intersect(self.db.get_unrated_files())
-        elif self.query_state.selected_rating is not None:
-            _intersect(self.db.get_files_by_rating(self.query_state.selected_rating))
+        allowed_paths = self._collect_filtered_paths()
 
         db_files = []
         if allowed_paths is None:
@@ -712,19 +717,9 @@ class MainWindow(QWidget):
                     db_files.append(file_record)
 
         for file_record in db_files:
-            path_obj = Path(file_record.path)
-            if not path_obj.exists():
-                continue
-            modified = file_record.modified_at.timestamp() if file_record.modified_at else path_obj.stat().st_mtime
-            result_files.append(
-                {
-                    "path": file_record.path,
-                    "name": file_record.filename or path_obj.name,
-                    "type": file_record.file_type or Config.get_file_type(file_record.path),
-                    "size": file_record.size_bytes or path_obj.stat().st_size,
-                    "modified": modified,
-                }
-            )
+            view_item = self._file_record_to_view_item(file_record)
+            if view_item is not None:
+                result_files.append(view_item)
 
         return result_files
 
@@ -997,6 +992,29 @@ class MainWindow(QWidget):
         )
         self.info_pane.set_file(file_path, file_info=file_info)
 
+    def _apply_to_selected_files(
+        self,
+        operation,
+        *,
+        reload_tags: bool = False,
+        reload_collections: bool = False,
+    ) -> list[str]:
+        """Apply an operation to the current selection and refresh dependent UI."""
+        selected = self.file_pane.get_selected_files()
+        if not selected:
+            return []
+
+        for file_path in selected:
+            operation(file_path)
+
+        if reload_tags:
+            self.load_tags()
+        if reload_collections:
+            self.load_collections()
+        self._refresh_selected_file_details()
+        self.refresh_view()
+        return selected
+
     def on_assign_tag(self):
         """Assign a tag to the selected files."""
         selected = self.file_pane.get_selected_files()
@@ -1015,11 +1033,11 @@ class MainWindow(QWidget):
         else:
             tag_name, ok = QInputDialog.getText(self, "Assign Tag", "Tag name:")
         if ok and tag_name:
-            for file_path in selected:
-                self.db.assign_tag_to_file(file_path, tag_name.strip())
-            self.load_tags()
-            self._refresh_selected_file_details()
-            self.refresh_view()
+            normalized_tag = tag_name.strip()
+            self._apply_to_selected_files(
+                lambda file_path: self.db.assign_tag_to_file(file_path, normalized_tag),
+                reload_tags=True,
+            )
 
     def on_remove_tag(self):
         """Remove a tag from the selected files."""
@@ -1034,11 +1052,10 @@ class MainWindow(QWidget):
 
         tag_name, ok = QInputDialog.getItem(self, "Remove Tag", "Tag:", available_tags, editable=False)
         if ok and tag_name:
-            for file_path in selected:
-                self.db.remove_tag_from_file(file_path, tag_name)
-            self.load_tags()
-            self._refresh_selected_file_details()
-            self.refresh_view()
+            self._apply_to_selected_files(
+                lambda file_path: self.db.remove_tag_from_file(file_path, tag_name),
+                reload_tags=True,
+            )
 
     def on_add_to_collection(self):
         """Add selected files to a collection."""
@@ -1060,11 +1077,11 @@ class MainWindow(QWidget):
                 self, "Add to Collection", "Collection name:"
             )
         if ok and collection_name:
-            for file_path in selected:
-                self.db.add_file_to_collection(file_path, collection_name.strip())
-            self.load_collections()
-            self._refresh_selected_file_details()
-            self.refresh_view()
+            normalized_collection = collection_name.strip()
+            self._apply_to_selected_files(
+                lambda file_path: self.db.add_file_to_collection(file_path, normalized_collection),
+                reload_collections=True,
+            )
 
     def on_remove_from_collection(self):
         """Remove selected files from a collection."""
@@ -1095,30 +1112,23 @@ class MainWindow(QWidget):
             editable=False,
         )
         if ok and collection_name:
-            for file_path in selected:
-                self.db.remove_file_from_collection(file_path, collection_name)
-            self._refresh_selected_file_details()
-            self.refresh_view()
+            self._apply_to_selected_files(
+                lambda file_path: self.db.remove_file_from_collection(file_path, collection_name)
+            )
 
     def on_set_rating(self, rating_value: int):
         """Set the rating on selected files."""
         selected = self.file_pane.get_selected_files()
         if not selected:
             return
-        for file_path in selected:
-            self.db.set_rating(file_path, rating_value)
-        self._refresh_selected_file_details()
-        self.refresh_view()
+        self._apply_to_selected_files(lambda file_path: self.db.set_rating(file_path, rating_value))
 
     def on_clear_rating(self):
         """Clear the rating from selected files."""
         selected = self.file_pane.get_selected_files()
         if not selected:
             return
-        for file_path in selected:
-            self.db.clear_rating(file_path)
-        self._refresh_selected_file_details()
-        self.refresh_view()
+        self._apply_to_selected_files(self.db.clear_rating)
 
     def on_batch_rename(self):
         """Open batch rename dialog."""
