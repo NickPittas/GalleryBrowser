@@ -1,8 +1,7 @@
 """GalleryBrowser application class."""
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeySequence
-from PyQt6.QtWidgets import QMainWindow, QMenu, QMenuBar
+from PyQt6.QtWidgets import QMainWindow
 
 import qtawesome as qta
 
@@ -36,6 +35,7 @@ class GalleryBrowserApp(QMainWindow):
 
         action_open = QAction(qta.icon("fa5s.folder-open", color="#a0a0a0"), "Open Folder...", self)
         action_open.setShortcut(QKeySequence("Ctrl+O"))
+        action_open.triggered.connect(self.main_window.open_folder_dialog)
         file_menu.addAction(action_open)
 
         file_menu.addSeparator()
@@ -66,3 +66,15 @@ class GalleryBrowserApp(QMainWindow):
 
         action_about = QAction(qta.icon("fa5s.info-circle", color="#a0a0a0"), "About", self)
         help_menu.addAction(action_about)
+
+    def closeEvent(self, event):
+        """Clean up child widgets on close."""
+        try:
+            self.main_window.preview_pane.cleanup()
+        except Exception:
+            pass
+        try:
+            self.main_window.info_pane.cleanup()
+        except Exception:
+            pass
+        super().closeEvent(event)

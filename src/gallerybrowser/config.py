@@ -1,9 +1,7 @@
 """Configuration and paths for GalleryBrowser."""
 
 import json
-import os
 from pathlib import Path
-from typing import Optional
 
 from appdirs import user_cache_dir, user_config_dir
 
@@ -19,6 +17,22 @@ def _check_oiio():
 
 
 HAS_OIIO = _check_oiio()
+
+
+def _repo_root() -> Path:
+    """Return the repository root for local fallback state."""
+    return Path(__file__).resolve().parents[2]
+
+
+def _ensure_writable_dir(path: Path, fallback_name: str) -> Path:
+    """Create a writable directory, falling back to repo-local state when needed."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    except OSError:
+        fallback = _repo_root() / ".local_state" / fallback_name / Config.APP_NAME
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
 
 
 class Config:
@@ -73,15 +87,13 @@ class Config:
     def get_cache_dir(cls) -> Path:
         """Get the cache directory."""
         cache_dir = Path(user_cache_dir(cls.APP_NAME, cls.APP_AUTHOR))
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir
+        return _ensure_writable_dir(cache_dir, "cache")
 
     @classmethod
     def get_config_dir(cls) -> Path:
         """Get the config directory."""
         config_dir = Path(user_config_dir(cls.APP_NAME, cls.APP_AUTHOR))
-        config_dir.mkdir(parents=True, exist_ok=True)
-        return config_dir
+        return _ensure_writable_dir(config_dir, "config")
 
     @classmethod
     def get_thumbnails_dir(cls, size: int) -> Path:
@@ -169,5 +181,13 @@ class Config:
         """Save settings dict to disk as JSON."""
         path = cls.get_settings_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+        existing = {}
+        if path.exists():
+            try:
+                with open(path, "r") as f:
+                    existing = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                existing = {}
+        existing.update(settings)
         with open(path, "w") as f:
-            json.dump(settings, f, indent=2)
+            json.dump(existing, f, indent=2)

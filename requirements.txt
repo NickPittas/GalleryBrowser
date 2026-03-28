@@ -23,6 +23,9 @@ PyGObject>=3.44.0
 # Utilities
 appdirs>=1.4.4
 python-dateutil>=2.8.0
+fileseq>=2.0.0
+numpy>=1.24.0
+openimageio>=3.0.0
 
 # Development
 pytest>=7.4.0

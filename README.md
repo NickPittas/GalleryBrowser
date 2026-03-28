@@ -1,16 +1,15 @@
 # GalleryBrowser
 
-A Linux-native asset management application for viewing and organizing images and videos, with special support for ComfyUI-generated content.
+A Linux-native browser for images, videos, and image sequences with DB-backed tags, collections, ratings, and fast preview workflows.
 
 ## Features
 
 - **3-Pane Interface**: Tree navigation, file grid/list, and preview/info panel
-- **ComfyUI Support**: Parse and display PNG workflow metadata
+- **Metadata Preview**: Image and video technical metadata in the info pane
 - **Advanced Preview**: GStreamer-based playback for all major formats
 - **File Management**: Copy, move, delete, batch rename with tokens
-- **Organization**: Tags, collections, ratings, and smart filters
+- **Organization**: Tags, collections, ratings, and folder/library filters
 - **Image Sequences**: Detect and play numbered image sequences
-- **Format Conversion**: Convert between image and video formats
 - **Linux Integration**: Context menus, single instance, Flatpak support
 
 ## Supported Formats
@@ -30,43 +29,55 @@ flatpak run com.nickpittas.gallerybrowser
 ### From Source
 
 ```bash
-# Clone repository
 git clone https://github.com/NickPittas/GalleryBrowser.git
 cd GalleryBrowser
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Install in development mode
-pip install -e .
-
-# Run
-gallerybrowser
+./setup_local_env.sh
+./run_local_app.sh
 ```
+
+`setup_local_env.sh` creates a repo-local `.venv`, installs runtime and dev dependencies there, and keeps runtime state inside `.local_state`. It uses `--system-site-packages` so the local venv can see Linux system packages such as `PyGObject` / GStreamer bindings without installing into system Python.
 
 ## Development
 
-### Setup Development Environment
+### Local Setup
 
 ```bash
-pip install -e ".[dev]"
+./setup_local_env.sh
+```
+
+### Run the App
+
+```bash
+./run_local_app.sh
 ```
 
 ### Run Tests
 
 ```bash
-pytest
+./run_local_tests.sh
 ```
 
-### Code Formatting
+By default, `run_local_tests.sh` runs:
 
 ```bash
-black src/ tests/
-ruff check src/ tests/
+tests/test_basic.py -q
+```
+
+You can pass your own pytest arguments too:
+
+```bash
+./run_local_tests.sh tests/test_thumbnails.py -q
+./run_local_tests.sh tests -q
+```
+
+The local test runner exports `QT_QPA_PLATFORM=offscreen` and the same repo-local XDG paths as the app, which is the most reliable way to run UI tests in a headless environment.
+
+### Formatting
+
+```bash
+./.venv/bin/black src/ tests/
+./.venv/bin/ruff check src/ tests/
 ```
 
 ## Usage
@@ -77,6 +88,8 @@ ruff check src/ tests/
 - **Navigate**: Click folders in left tree pane
 - **View Files**: Grid or List view in center pane
 - **Preview**: Select file to see preview in right pane
+- **Filter Scope**: Switch between `Folder` and `Library` in the toolbar
+- **Organize**: Use tags, collections, and rating filters from the left panel and toolbar
 
 ### File Operations
 
@@ -89,11 +102,26 @@ ruff check src/ tests/
 
 ### ComfyUI Metadata
 
-When viewing ComfyUI-generated PNG files, the info panel shows:
-- Positive and negative prompts
-- Model name and settings
-- Seed, steps, CFG scale
-- Full workflow JSON
+ComfyUI-specific metadata parsing is still a follow-up item. Current builds focus on
+filesystem browsing, video/image/sequence preview, and DB-backed organization features.
+
+## Current v1 Scope
+
+Shipped now:
+
+- Open-folder flow from the menu and shortcut
+- Persistent settings, favorites, and recents
+- DB-backed tags, collections, and ratings
+- Folder-scoped and library-scoped filtering
+- Video metadata in the info pane, loaded asynchronously
+- Local-only setup scripts for app launch and headless tests
+
+Still follow-up work:
+
+- richer ComfyUI metadata display
+- broader UI/integration test coverage beyond the current regression suite
+- docs/design cleanup in `docs/DESIGN.md`, which still describes planned architecture in a few places
+- format conversion and other advanced roadmap features
 
 ### Keyboard Shortcuts
 
@@ -101,7 +129,7 @@ See `docs/user_guide/KEYBOARD_SHORTCUTS.md`
 
 ## Architecture
 
-See `docs/DESIGN.md` for detailed architecture and design decisions.
+See `docs/DESIGN.md` for the broader design direction. Some sections there are still aspirational and describe planned components rather than the exact current implementation.
 
 ## License
 

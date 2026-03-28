@@ -12,6 +12,27 @@ class MetadataExtractor:
     """Extracts metadata from image and video files."""
 
     @staticmethod
+    def _parse_frame_rate(value: Optional[str]) -> Optional[float]:
+        """Parse an ffprobe frame-rate field into a float."""
+        if not value:
+            return None
+
+        try:
+            if "/" in value:
+                num_text, den_text = value.split("/", 1)
+                numerator = float(num_text)
+                denominator = float(den_text)
+                if denominator == 0:
+                    return None
+                fps = numerator / denominator
+            else:
+                fps = float(value)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+
+        return fps if fps > 0 else None
+
+    @staticmethod
     def extract_image_metadata(file_path: str) -> Dict[str, Any]:
         """Extract metadata from an image file.
 
@@ -87,7 +108,7 @@ class MetadataExtractor:
                 "-show_entries",
                 "format=duration,bit_rate,format_name",
                 "-show_entries",
-                "stream=width,height,codec_name,r_frame_rate",
+                "stream=codec_type,width,height,codec_name,avg_frame_rate,r_frame_rate,duration",
                 "-of",
                 "json",
                 file_path,
@@ -102,7 +123,8 @@ class MetadataExtractor:
                 if "format" in data:
                     fmt = data["format"]
                     metadata["format"] = fmt.get("format_name", "").split(",")[0]
-                    metadata["duration"] = float(fmt.get("duration", 0))
+                    duration = fmt.get("duration")
+                    metadata["duration"] = float(duration) if duration else None
                     metadata["bitrate"] = (
                         int(fmt.get("bit_rate", 0)) if fmt.get("bit_rate") else None
                     )
@@ -114,13 +136,11 @@ class MetadataExtractor:
                             metadata["width"] = stream.get("width")
                             metadata["height"] = stream.get("height")
                             metadata["codec"] = stream.get("codec_name")
-
-                            # Calculate FPS
-                            fps_str = stream.get("r_frame_rate", "0/1")
-                            if "/" in fps_str:
-                                num, den = fps_str.split("/")
-                                if int(den) != 0:
-                                    metadata["fps"] = float(num) / float(den)
+                            metadata["fps"] = MetadataExtractor._parse_frame_rate(
+                                stream.get("avg_frame_rate")
+                            ) or MetadataExtractor._parse_frame_rate(stream.get("r_frame_rate"))
+                            if metadata["duration"] is None and stream.get("duration"):
+                                metadata["duration"] = float(stream["duration"])
                             break
 
         except Exception as e:

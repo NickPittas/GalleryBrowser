@@ -462,7 +462,8 @@ class VideoPreviewWidget(QWidget):
         self._loop_enabled = False
         self._fps = 30.0  # Default FPS, updated from video caps
         self._frame_timer = QTimer()
-        self._frame_timer.timeout.connect(self._update_frame)
+        self._frame_timer.setInterval(100)
+        self._frame_timer.timeout.connect(self._update_position)
         self._current_pixmap = None  # Store original pixmap for rescaling on resize
 
         # Timer to poll GStreamer bus for EOS / error messages.
@@ -476,6 +477,7 @@ class VideoPreviewWidget(QWidget):
         # Pending preroll frame data set by _on_new_preroll (GStreamer thread)
         # and consumed by _display_preroll_frame (Qt main thread).
         self._pending_preroll = None  # QImage or None
+        self._pending_sample = None  # QImage or None
 
     def _show_fallback_ui(self):
         """Show fallback UI when GStreamer is not available."""
@@ -659,6 +661,7 @@ class VideoPreviewWidget(QWidget):
             # Connect new-preroll signal for frame updates after seeks in PAUSED state.
             # The signal fires on the GStreamer streaming thread, so the callback
             # extracts raw pixel data and schedules a Qt-thread display update.
+            appsink.connect("new-sample", self._on_new_sample)
             appsink.connect("new-preroll", self._on_new_preroll)
 
             # Start playing briefly to decode first frame, then pause
@@ -677,9 +680,6 @@ class VideoPreviewWidget(QWidget):
                 if success and duration > 0:
                     self._duration = duration / Gst.SECOND
                     self._update_time_label(0, self._duration)
-
-            # Pull first frame and display it
-            self._update_frame()
 
             # Extract actual framerate from the appsink pad's negotiated caps.
             # This is more reliable than last-sample which may not exist yet.
@@ -954,6 +954,41 @@ class VideoPreviewWidget(QWidget):
         self._current_pixmap = QPixmap.fromImage(img)
         self._rescale_frame()
 
+    def _on_new_sample(self, appsink):
+        """GStreamer streaming-thread callback for normal playback frames."""
+        try:
+            import gi
+
+            gi.require_version("Gst", "1.0")
+            from gi.repository import Gst
+
+            sample = appsink.emit("pull-sample")
+            if not sample:
+                return Gst.FlowReturn.OK
+
+            buf = sample.get_buffer()
+            caps = sample.get_caps()
+            s = caps.get_structure(0)
+            w, h = s.get_value("width"), s.get_value("height")
+            ok, mi = buf.map(Gst.MapFlags.READ)
+            if ok:
+                img = QImage(mi.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
+                buf.unmap(mi)
+                self._pending_sample = img
+                QTimer.singleShot(0, self._display_sample_frame)
+            return Gst.FlowReturn.OK
+        except Exception:
+            return Gst.FlowReturn.OK
+
+    def _display_sample_frame(self):
+        """Qt main-thread: display the latest playback frame."""
+        img = self._pending_sample
+        if img is None:
+            return
+        self._pending_sample = None
+        self._current_pixmap = QPixmap.fromImage(img)
+        self._rescale_frame()
+
     def _on_slider_moved(self):
         """Handle slider movement for live scrubbing."""
         # Only update if video is paused (not playing)
@@ -989,36 +1024,13 @@ class VideoPreviewWidget(QWidget):
         except Exception as e:
             print(f"Error in live scrubbing: {e}")
 
-    def _update_frame(self):
-        """Pull frame from GStreamer and display it."""
-        if not self._appsink:
-            return
-
+    def _update_position(self):
+        """Refresh timeline position while playback is active."""
         try:
             import gi
 
             gi.require_version("Gst", "1.0")
             from gi.repository import Gst
-
-            # Use try_pull_sample with timeout to avoid blocking indefinitely
-            sample = self._appsink.emit("try-pull-sample", 100000000)  # 100ms timeout in ns
-            if sample:
-                buffer = sample.get_buffer()
-                caps = sample.get_caps()
-
-                structure = caps.get_structure(0)
-                width = structure.get_value("width")
-                height = structure.get_value("height")
-
-                success, mapinfo = buffer.map(Gst.MapFlags.READ)
-                if success:
-                    # Create QImage from buffer
-                    image = QImage(
-                        mapinfo.data, width, height, width * 3, QImage.Format.Format_RGB888
-                    )
-                    self._current_pixmap = QPixmap.fromImage(image)
-                    self._rescale_frame()
-                    buffer.unmap(mapinfo)
 
             # Update position (block signals to avoid feedback loop)
             if self._is_playing and self._pipeline:

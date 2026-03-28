@@ -786,6 +786,22 @@ class FileItemWidget(QWidget):
         delete_action = menu.addAction("Delete")
         menu.addSeparator()
 
+        tags_menu = menu.addMenu("Tags")
+        add_tag_action = tags_menu.addAction("Assign Tag...")
+        remove_tag_action = tags_menu.addAction("Remove Tag...")
+
+        collections_menu = menu.addMenu("Collections")
+        add_collection_action = collections_menu.addAction("Add to Collection...")
+        remove_collection_action = collections_menu.addAction("Remove from Collection...")
+
+        rating_menu = menu.addMenu("Rating")
+        rating_actions = {}
+        for value in range(0, 6):
+            label = "0 Stars" if value == 0 else f"{value} Star{'s' if value != 1 else ''}"
+            rating_action = rating_menu.addAction(label)
+            rating_actions[rating_action] = value
+        clear_rating_action = rating_menu.addAction("Clear Rating")
+
         # "Add folder to Favorites" — if current folder is set
         add_fav_action = None
         if file_pane.current_folder:
@@ -807,6 +823,18 @@ class FileItemWidget(QWidget):
             file_pane.action_batch_rename.emit(selected)
         elif action == delete_action:
             file_pane.action_delete.emit(selected)
+        elif action == add_tag_action:
+            file_pane.action_add_tag.emit()
+        elif action == remove_tag_action:
+            file_pane.action_remove_tag.emit()
+        elif action == add_collection_action:
+            file_pane.action_add_to_collection.emit()
+        elif action == remove_collection_action:
+            file_pane.action_remove_from_collection.emit()
+        elif action in rating_actions:
+            file_pane.action_set_rating.emit(rating_actions[action])
+        elif action == clear_rating_action:
+            file_pane.action_clear_rating.emit()
         elif add_fav_action and action == add_fav_action:
             file_pane.action_add_favorite.emit(file_pane.current_folder)
 
@@ -860,10 +888,17 @@ class FilePane(QWidget):
     action_batch_rename = pyqtSignal(list)
     action_delete = pyqtSignal(list)
     action_add_favorite = pyqtSignal(str)  # Emits folder path
+    action_add_tag = pyqtSignal()
+    action_remove_tag = pyqtSignal()
+    action_add_to_collection = pyqtSignal()
+    action_remove_from_collection = pyqtSignal()
+    action_set_rating = pyqtSignal(int)
+    action_clear_rating = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         self.current_folder: str = ""
+        self.source_label: str = ""
         self.files: list = []  # All files in folder
         self.filtered_files: list = []  # Files after search filter
         self.file_widgets: dict = {}  # path -> FileItemWidget
@@ -974,8 +1009,18 @@ class FilePane(QWidget):
 
     def set_folder(self, folder_path: str):
         """Set the current folder and display its files."""
-        self.current_folder = folder_path
-        self.files = self.scan_folder(folder_path)
+        self.set_files(
+            self.scan_folder(folder_path),
+            current_folder=folder_path,
+            source_label=folder_path,
+        )
+
+    def set_files(self, files: list, current_folder: str = "", source_label: str = ""):
+        """Set an explicit file source for display."""
+        self.current_folder = current_folder
+        self.source_label = source_label or current_folder
+        self.files = list(files)
+        self.clear_selection()
 
         # Stop any running thumbnail worker
         if self.thumbnail_worker.isRunning():
@@ -1295,7 +1340,7 @@ class FilePane(QWidget):
 
     def generate_thumbnails(self):
         """Start generating thumbnails for visible files."""
-        for file_info in self.files:
+        for file_info in self.filtered_files:
             self.thumbnail_worker.add_to_queue(file_info["path"], self.thumbnail_size)
 
         if not self.thumbnail_worker.isRunning():

@@ -2,6 +2,7 @@
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QLabel,
     QHBoxLayout,
     QInputDialog,
     QListWidget,
@@ -19,12 +20,14 @@ class TagsPanel(QWidget):
     """Panel for managing tags."""
 
     tag_selected = pyqtSignal(str)  # Emits tag name when selected
-    file_tagged = pyqtSignal(str, list)  # Emits (tag_name, list of file paths)
+    tag_cleared = pyqtSignal()
+    tag_created = pyqtSignal(str)
+    tag_deleted = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
         self.setup_ui()
-        self.tags = []  # List of tag names
+        self.tags = {}  # name -> tag object or dict
 
     def setup_ui(self):
         """Set up the UI."""
@@ -34,6 +37,12 @@ class TagsPanel(QWidget):
 
         # Header with add button
         header_layout = QHBoxLayout()
+        title = QLabel("Tags")
+        title.setStyleSheet("color: #a0a0a0; font-weight: 600;")
+        header_layout.addWidget(title)
+        clear_btn = QPushButton("All")
+        clear_btn.clicked.connect(self.tag_cleared.emit)
+        header_layout.addWidget(clear_btn)
         header_layout.addStretch()
         add_btn = QPushButton(qta.icon("fa5s.plus", color="#a0a0a0"), "Add Tag")
         add_btn.clicked.connect(self.on_add_tag)
@@ -69,19 +78,22 @@ class TagsPanel(QWidget):
 
     def set_tags(self, tags):
         """Set the list of available tags."""
-        self.tags = tags
+        current = self.get_selected_tag()
+        self.tags = {}
         self.tags_list.clear()
-        for tag in sorted(tags):
-            item = QListWidgetItem(qta.icon("fa5s.tag", color="#E2B340"), tag)
+        for tag in sorted(tags, key=lambda t: getattr(t, "name", str(t)).lower()):
+            tag_name = getattr(tag, "name", str(tag))
+            self.tags[tag_name] = tag
+            item = QListWidgetItem(qta.icon("fa5s.tag", color="#E2B340"), tag_name)
             self.tags_list.addItem(item)
+        if current:
+            self.set_active_tag(current)
 
     def on_add_tag(self):
         """Add a new tag."""
         text, ok = QInputDialog.getText(self, "New Tag", "Tag name:")
         if ok and text:
-            if text not in self.tags:
-                self.tags.append(text)
-                self.set_tags(self.tags)
+            self.tag_created.emit(text.strip())
 
     def on_tag_clicked(self, item):
         """Handle tag click."""
@@ -95,12 +107,24 @@ class TagsPanel(QWidget):
             delete_action = menu.addAction("Delete Tag")
             action = menu.exec(self.tags_list.mapToGlobal(position))
             if action == delete_action:
-                tag = item.text()
-                if tag in self.tags:
-                    self.tags.remove(tag)
-                    self.set_tags(self.tags)
+                self.tag_deleted.emit(item.text())
 
     def get_selected_tag(self):
         """Get currently selected tag."""
         item = self.tags_list.currentItem()
         return item.text() if item else None
+
+    def set_active_tag(self, tag_name: str | None):
+        """Select the given tag in the list when present."""
+        if not tag_name:
+            self.tags_list.clearSelection()
+            self.tags_list.setCurrentItem(None)
+            return
+        for row in range(self.tags_list.count()):
+            item = self.tags_list.item(row)
+            if item.text() == tag_name:
+                self.tags_list.setCurrentItem(item)
+                item.setSelected(True)
+                return
+        self.tags_list.clearSelection()
+        self.tags_list.setCurrentItem(None)

@@ -136,14 +136,15 @@ class SettingsDialog(QDialog):
 
     def on_save(self):
         """Save settings to disk."""
-        settings = {
+        settings = Config.load_settings()
+        settings.update({
             "thumbnail_size": int(self.thumb_size_combo.currentText()),
             "show_hidden": self.show_hidden_check.isChecked(),
             "video_preview": self.video_preview_check.isChecked(),
             "thumbnail_threads": self.thread_spin.value(),
             "max_cache_mb": self.cache_spin.value(),
             "ram_preview_mb": self.ram_preview_spin.value(),
-        }
+        })
         Config.save_settings(settings)
         self.accept()
 

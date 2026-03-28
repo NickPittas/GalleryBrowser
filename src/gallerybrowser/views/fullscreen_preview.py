@@ -303,7 +303,8 @@ class _VideoViewer(QWidget):
         self._setup_ui()
 
         self._frame_timer = QTimer()
-        self._frame_timer.timeout.connect(self._update_frame)
+        self._frame_timer.setInterval(100)
+        self._frame_timer.timeout.connect(self._update_position)
         self._scrub_timer = QTimer()
         self._scrub_timer.setSingleShot(True)
         self._scrub_timer.timeout.connect(self._live_seek)
@@ -314,6 +315,7 @@ class _VideoViewer(QWidget):
         # Pending preroll frame data set by _on_new_preroll (GStreamer thread)
         # and consumed by _display_preroll_frame (Qt main thread).
         self._pending_preroll = None  # (QImage, w, h) or None
+        self._pending_sample = None  # QImage or None
 
     # -- UI setup --
 
@@ -535,6 +537,7 @@ class _VideoViewer(QWidget):
             # Connect new-preroll signal for frame updates after seeks in PAUSED state.
             # The signal fires on the GStreamer streaming thread, so the callback
             # extracts raw pixel data and schedules a Qt-thread display update.
+            appsink.connect("new-sample", self._on_new_sample)
             appsink.connect("new-preroll", self._on_new_preroll)
 
             self._pipeline.set_state(Gst.State.PLAYING)
@@ -555,7 +558,7 @@ class _VideoViewer(QWidget):
 
             # Leave pipeline in PLAYING — play() is always called after load()
             self._is_playing = True
-            self._frame_timer.start(33)
+            self._frame_timer.start()
             self._bus_timer.start()
             self._play_btn.setIcon(qta.icon("fa5s.pause", color=_TEXT))
 
@@ -613,7 +616,7 @@ class _VideoViewer(QWidget):
 
             self._pipeline.set_state(Gst.State.PLAYING)
             self._is_playing = True
-            self._frame_timer.start(33)
+            self._frame_timer.start()
             self._bus_timer.start()
             self._play_btn.setIcon(qta.icon("fa5s.pause", color=_TEXT))
 
@@ -826,28 +829,48 @@ class _VideoViewer(QWidget):
         self._current_pixmap = QPixmap.fromImage(img)
         self._rescale()
 
-    def _update_frame(self):
-        if not self._appsink:
-            return
+    def _on_new_sample(self, appsink):
+        """GStreamer streaming-thread callback for normal playback frames."""
         try:
             import gi
 
             gi.require_version("Gst", "1.0")
             from gi.repository import Gst
-            from PyQt6.QtGui import QImage
 
-            sample = self._appsink.emit("try-pull-sample", 100_000_000)
-            if sample:
-                buf = sample.get_buffer()
-                caps = sample.get_caps()
-                s = caps.get_structure(0)
-                w, h = s.get_value("width"), s.get_value("height")
-                ok, mi = buf.map(Gst.MapFlags.READ)
-                if ok:
-                    img = QImage(mi.data, w, h, w * 3, QImage.Format.Format_RGB888)
-                    self._current_pixmap = QPixmap.fromImage(img)
-                    self._rescale()
-                    buf.unmap(mi)
+            sample = appsink.emit("pull-sample")
+            if not sample:
+                return Gst.FlowReturn.OK
+
+            buf = sample.get_buffer()
+            caps = sample.get_caps()
+            s = caps.get_structure(0)
+            w, h = s.get_value("width"), s.get_value("height")
+            ok, mi = buf.map(Gst.MapFlags.READ)
+            if ok:
+                img = QImage(mi.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
+                buf.unmap(mi)
+                self._pending_sample = img
+                QTimer.singleShot(0, self._display_sample_frame)
+            return Gst.FlowReturn.OK
+        except Exception:
+            return Gst.FlowReturn.OK
+
+    def _display_sample_frame(self):
+        """Qt main-thread: display the latest playback frame."""
+        img = self._pending_sample
+        if img is None:
+            return
+        self._pending_sample = None
+        self._current_pixmap = QPixmap.fromImage(img)
+        self._rescale()
+
+    def _update_position(self):
+        """Refresh timeline position while playback is active."""
+        try:
+            import gi
+
+            gi.require_version("Gst", "1.0")
+            from gi.repository import Gst
 
             if self._is_playing and self._pipeline:
                 # Deferred duration query for async pipelines

@@ -1,14 +1,17 @@
 """Main window with 3-pane layout and modern styling."""
 
+from dataclasses import dataclass
+from pathlib import Path
+
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QAction, QIcon, QKeyEvent, QKeySequence
+from PyQt6.QtGui import QAction, QCloseEvent, QKeyEvent, QKeySequence
 from PyQt6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
-    QMainWindow,
-    QMenuBar,
     QMessageBox,
     QSizePolicy,
     QSlider,
@@ -16,7 +19,6 @@ from PyQt6.QtWidgets import (
     QStatusBar,
     QTabWidget,
     QToolBar,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -24,6 +26,7 @@ from PyQt6.QtWidgets import (
 import qtawesome as qta
 
 from gallerybrowser.views.batch_rename_dialog import BatchRenameDialog
+from gallerybrowser.views.collections_panel import CollectionsPanel
 from gallerybrowser.views.file_pane import FilePane
 from gallerybrowser.views.info_pane import InfoPane
 from gallerybrowser.views.preview_pane import PreviewPane
@@ -32,6 +35,20 @@ from gallerybrowser.views.tags_panel import TagsPanel
 from gallerybrowser.views.tree_pane import TreePane
 from gallerybrowser.core.file_manager import FileManager
 from gallerybrowser.config import Config
+from gallerybrowser.database.manager import DatabaseManager
+
+
+@dataclass
+class QueryState:
+    """Holds the active file browsing query."""
+
+    scope: str = "folder"
+    file_type: str = "all"
+    search_text: str = ""
+    selected_tag: str | None = None
+    selected_collection: str | None = None
+    selected_rating: int | None = None
+    unrated_only: bool = False
 
 
 class MainWindow(QWidget):
@@ -42,9 +59,14 @@ class MainWindow(QWidget):
         self.current_path = ""
         self.clipboard = []  # List of (file_path, operation_type) tuples
         self.file_manager = FileManager()
+        self.db = DatabaseManager()
+        if self.db._session_factory is None:
+            self.db.initialize(str(Config.get_database_path()))
+        self.query_state = QueryState()
         self.setup_ui()
         self.setup_menu()
         self.connect_actions()
+        self.load_collections()
         self.load_tags()
         self._apply_saved_settings()
 
@@ -74,7 +96,18 @@ class MainWindow(QWidget):
         # Tags tab
         self.tags_panel = TagsPanel()
         self.tags_panel.tag_selected.connect(self.on_tag_selected)
+        self.tags_panel.tag_cleared.connect(self.clear_tag_filter)
+        self.tags_panel.tag_created.connect(self.on_create_tag)
+        self.tags_panel.tag_deleted.connect(self.on_delete_tag)
         self.left_tabs.addTab(self.tags_panel, "Tags")
+
+        # Collections tab
+        self.collections_panel = CollectionsPanel()
+        self.collections_panel.collection_selected.connect(self.on_collection_selected)
+        self.collections_panel.collection_cleared.connect(self.clear_collection_filter)
+        self.collections_panel.collection_created.connect(self.on_create_collection)
+        self.collections_panel.collection_deleted.connect(self.on_delete_collection)
+        self.left_tabs.addTab(self.collections_panel, "Collections")
 
         self.main_splitter.addWidget(self.left_tabs)
 
@@ -295,6 +328,38 @@ class MainWindow(QWidget):
 
         self.toolbar.addSeparator()
 
+        scope_widget = QWidget()
+        scope_layout = QHBoxLayout(scope_widget)
+        scope_layout.setContentsMargins(8, 0, 0, 0)
+        scope_layout.setSpacing(4)
+        scope_label = QLabel("Scope:")
+        scope_label.setStyleSheet("color: #a0a0a0;")
+        scope_layout.addWidget(scope_label)
+        self.scope_combo = QComboBox()
+        self.scope_combo.addItems(["Folder", "Library"])
+        self.scope_combo.setFixedWidth(90)
+        self.scope_combo.currentTextChanged.connect(self.on_scope_changed)
+        scope_layout.addWidget(self.scope_combo)
+        self.toolbar.addWidget(scope_widget)
+
+        rating_widget = QWidget()
+        rating_layout = QHBoxLayout(rating_widget)
+        rating_layout.setContentsMargins(8, 0, 0, 0)
+        rating_layout.setSpacing(4)
+        rating_label = QLabel("Rating:")
+        rating_label.setStyleSheet("color: #a0a0a0;")
+        rating_layout.addWidget(rating_label)
+        self.rating_filter_combo = QComboBox()
+        self.rating_filter_combo.addItems(
+            ["Any Rating", "Unrated", "0 Stars", "1 Star", "2 Stars", "3 Stars", "4 Stars", "5 Stars"]
+        )
+        self.rating_filter_combo.setFixedWidth(110)
+        self.rating_filter_combo.currentTextChanged.connect(self.on_rating_filter_changed)
+        rating_layout.addWidget(self.rating_filter_combo)
+        self.toolbar.addWidget(rating_widget)
+
+        self.toolbar.addSeparator()
+
         # Sequence collapse toggle
         self.action_collapse_sequences = QAction(
             qta.icon("fa5s.layer-group", color="#a0a0a0"), "Collapse Sequences", self
@@ -399,6 +464,12 @@ class MainWindow(QWidget):
         self.file_pane.action_batch_rename.connect(lambda _: self.on_batch_rename())
         self.file_pane.action_delete.connect(lambda _: self.on_delete())
         self.file_pane.action_add_favorite.connect(self._on_add_favorite_from_ctx)
+        self.file_pane.action_add_tag.connect(self.on_assign_tag)
+        self.file_pane.action_remove_tag.connect(self.on_remove_tag)
+        self.file_pane.action_add_to_collection.connect(self.on_add_to_collection)
+        self.file_pane.action_remove_from_collection.connect(self.on_remove_from_collection)
+        self.file_pane.action_set_rating.connect(self.on_set_rating)
+        self.file_pane.action_clear_rating.connect(self.on_clear_rating)
 
     def on_copy(self):
         """Copy selected files to clipboard."""
@@ -446,7 +517,7 @@ class MainWindow(QWidget):
             self.clipboard.clear()
 
         # Refresh the view
-        self.file_pane.set_folder(self.current_path)
+        self.refresh_view()
 
     def on_delete(self):
         """Delete selected files (with confirmation)."""
@@ -463,7 +534,7 @@ class MainWindow(QWidget):
             if reply == QMessageBox.StandardButton.Yes:
                 for file_path in selected:
                     self.file_manager.delete(file_path, use_trash=True)
-                self.file_pane.set_folder(self.current_path)
+                self.refresh_view()
 
     def on_rename(self):
         """Rename selected file."""
@@ -480,13 +551,182 @@ class MainWindow(QWidget):
 
             if ok and new_name and new_name != current_name:
                 self.file_manager.rename(file_path, new_name)
-                self.file_pane.set_folder(self.current_path)
+                self.refresh_view()
 
     def on_refresh(self):
         """Refresh the current folder view."""
-        if self.current_path:
-            self.file_pane.set_folder(self.current_path)
-            self.update_status_count()
+        self.refresh_view()
+
+    def open_folder_dialog(self):
+        """Open a folder picker and navigate to the selected folder."""
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Open Folder",
+            self.current_path or str(Path.home()),
+        )
+        if folder:
+            self.on_folder_selected(folder)
+
+    def refresh_view(self):
+        """Refresh the file view using the current query state."""
+        source_label = self.current_path or "No folder selected"
+        previous_selection = set(self.file_pane.get_selected_files())
+
+        if self.query_state.scope == "folder":
+            if not self.current_path:
+                self.file_pane.set_files([], current_folder="", source_label="No folder selected")
+                self.path_label.setText("No folder selected")
+                self.update_status_count()
+                return
+
+            base_files = self.file_pane.scan_folder(self.current_path)
+            filtered_files = self._apply_library_filters_to_folder(base_files)
+            source_label = self._build_source_label(self.current_path)
+            self.file_pane.set_files(
+                filtered_files,
+                current_folder=self.current_path,
+                source_label=source_label,
+            )
+        else:
+            library_files = self._build_library_results()
+            source_label = self._build_source_label("Library")
+            self.file_pane.set_files(library_files, current_folder="", source_label=source_label)
+
+        if previous_selection:
+            visible_paths = {item["path"] for item in self.file_pane.filtered_files}
+            retained_selection = [
+                file_path for file_path in previous_selection if file_path in visible_paths
+            ]
+            if retained_selection:
+                self.file_pane.set_selection(retained_selection)
+
+        self.path_label.setText(source_label)
+        self.update_status_count()
+
+    def _current_source_prefix(self) -> str:
+        """Return the base label for the current results source."""
+        if self.query_state.scope == "library":
+            return "Library"
+        return self.current_path or "No folder selected"
+
+    def _sync_source_label(self):
+        """Update the path/source label without rebuilding the current results."""
+        self.path_label.setText(self._build_source_label(self._current_source_prefix()))
+
+    def _build_source_label(self, prefix: str) -> str:
+        """Build a human-readable source label for the status bar."""
+        filters = []
+        if self.query_state.selected_tag:
+            filters.append(f"tag:{self.query_state.selected_tag}")
+        if self.query_state.selected_collection:
+            filters.append(f"collection:{self.query_state.selected_collection}")
+        if self.query_state.file_type != "all":
+            filters.append(f"type:{self.query_state.file_type}")
+        if self.query_state.search_text:
+            filters.append(f"search:{self.query_state.search_text}")
+        if self.query_state.unrated_only:
+            filters.append("rating:unrated")
+        elif self.query_state.selected_rating is not None:
+            filters.append(f"rating:{self.query_state.selected_rating}")
+        if not filters:
+            return prefix
+        return f"{prefix} [{', '.join(filters)}]"
+
+    def _apply_library_filters_to_folder(self, files: list[dict]) -> list[dict]:
+        """Apply DB-backed tag/collection/rating filters to folder scan results."""
+        allowed_paths = None
+
+        def _intersect(paths: set[str]):
+            nonlocal allowed_paths
+            allowed_paths = paths if allowed_paths is None else allowed_paths & paths
+
+        if self.query_state.selected_tag:
+            _intersect(
+                {
+                    file_record.path
+                    for file_record in self.db.get_files_by_tag(
+                        self.query_state.selected_tag, folder_path=self.current_path
+                    )
+                }
+            )
+
+        if self.query_state.selected_collection:
+            _intersect(
+                {
+                    file_record.path
+                    for file_record in self.db.get_files_by_collection(
+                        self.query_state.selected_collection,
+                        folder_path=self.current_path,
+                    )
+                }
+            )
+
+        if self.query_state.unrated_only:
+            _intersect(
+                {
+                    file_record.path
+                    for file_record in self.db.get_unrated_files(folder_path=self.current_path)
+                }
+            )
+        elif self.query_state.selected_rating is not None:
+            _intersect(
+                {
+                    file_record.path
+                    for file_record in self.db.get_files_by_rating(
+                        self.query_state.selected_rating,
+                        folder_path=self.current_path,
+                    )
+                }
+            )
+
+        if allowed_paths is None:
+            return files
+        return [file_info for file_info in files if file_info["path"] in allowed_paths]
+
+    def _build_library_results(self) -> list[dict]:
+        """Build explicit library-wide result rows from DB-backed filters."""
+        result_files = []
+        allowed_paths = None
+
+        def _intersect(file_records):
+            nonlocal allowed_paths
+            paths = {file_record.path for file_record in file_records}
+            allowed_paths = paths if allowed_paths is None else allowed_paths & paths
+
+        if self.query_state.selected_tag:
+            _intersect(self.db.get_files_by_tag(self.query_state.selected_tag))
+        if self.query_state.selected_collection:
+            _intersect(self.db.get_files_by_collection(self.query_state.selected_collection))
+        if self.query_state.unrated_only:
+            _intersect(self.db.get_unrated_files())
+        elif self.query_state.selected_rating is not None:
+            _intersect(self.db.get_files_by_rating(self.query_state.selected_rating))
+
+        db_files = []
+        if allowed_paths is None:
+            db_files = self.db.get_all_files()
+        else:
+            for file_path in sorted(allowed_paths):
+                file_record = self.db.get_file_by_path(file_path)
+                if file_record is not None:
+                    db_files.append(file_record)
+
+        for file_record in db_files:
+            path_obj = Path(file_record.path)
+            if not path_obj.exists():
+                continue
+            modified = file_record.modified_at.timestamp() if file_record.modified_at else path_obj.stat().st_mtime
+            result_files.append(
+                {
+                    "path": file_record.path,
+                    "name": file_record.filename or path_obj.name,
+                    "type": file_record.file_type or Config.get_file_type(file_record.path),
+                    "size": file_record.size_bytes or path_obj.stat().st_size,
+                    "modified": modified,
+                }
+            )
+
+        return result_files
 
     def _on_ctx_open(self, file_paths):
         """Open files from context menu with default application."""
@@ -575,9 +815,7 @@ class MainWindow(QWidget):
     def on_folder_selected(self, folder_path: str):
         """Handle folder selection from tree pane."""
         self.current_path = folder_path
-        self.file_pane.set_folder(folder_path)
-        self.path_label.setText(folder_path)
-        self.update_status_count()
+        self.refresh_view()
         # Track in recents
         self.tree_pane.add_recent(folder_path)
         # Sync tree view: expand filesystem tree to this folder
@@ -613,7 +851,7 @@ class MainWindow(QWidget):
         if self.current_path == target_folder or (
             not is_copy and self.current_path in {str(Path(p).parent) for p in file_paths}
         ):
-            self.file_pane.set_folder(self.current_path)
+            self.refresh_view()
 
     def on_file_selected(self, file_path: str):
         """Handle file selection from file pane."""
@@ -623,8 +861,14 @@ class MainWindow(QWidget):
             if f["path"] == file_path:
                 file_info = f
                 break
+        if file_info is None:
+            file_info = {
+                "path": file_path,
+                "name": Path(file_path).name,
+                "type": Config.get_file_type(file_path),
+            }
         self.preview_pane.set_file(file_path, file_info=file_info)
-        self.info_pane.set_file(file_path)
+        self.info_pane.set_file(file_path, file_info=file_info)
 
     def on_thumbnail_size_changed(self, value: int):
         """Handle thumbnail size slider change."""
@@ -664,7 +908,9 @@ class MainWindow(QWidget):
 
     def on_search_text_changed(self, text: str):
         """Handle search text change."""
+        self.query_state.search_text = text
         self.file_pane.set_search_text(text)
+        self._sync_source_label()
 
     def on_settings(self):
         """Open settings dialog."""
@@ -699,6 +945,181 @@ class MainWindow(QWidget):
             if player is not None:
                 player.set_max_cache_bytes(ram_bytes)
 
+    def on_create_tag(self, tag_name: str):
+        """Create a tag and refresh the panel."""
+        if not tag_name:
+            return
+        if self.db.get_tag_by_name(tag_name) is None:
+            self.db.add_tag(tag_name)
+        self.load_tags()
+
+    def on_delete_tag(self, tag_name: str):
+        """Delete a tag and refresh the panel."""
+        tag = self.db.get_tag_by_name(tag_name)
+        if tag is None:
+            return
+        self.db.delete_tag(tag.id)
+        if self.query_state.selected_tag == tag_name:
+            self.query_state.selected_tag = None
+        self.load_tags()
+        self.tags_panel.set_active_tag(self.query_state.selected_tag)
+        self.refresh_view()
+
+    def on_create_collection(self, collection_name: str):
+        """Create a collection and refresh the panel."""
+        if not collection_name:
+            return
+        if self.db.get_collection_by_name(collection_name) is None:
+            self.db.add_collection(collection_name)
+        self.load_collections()
+
+    def on_delete_collection(self, collection_name: str):
+        """Delete a collection and refresh the panel."""
+        collection = self.db.get_collection_by_name(collection_name)
+        if collection is None:
+            return
+        self.db.delete_collection(collection.id)
+        if self.query_state.selected_collection == collection_name:
+            self.query_state.selected_collection = None
+        self.load_collections()
+        self.collections_panel.set_active_collection(self.query_state.selected_collection)
+        self.refresh_view()
+
+    def _refresh_selected_file_details(self):
+        """Refresh the info pane for the current single-file selection when possible."""
+        selected = self.file_pane.get_selected_files()
+        if len(selected) != 1:
+            return
+        file_path = selected[0]
+        file_info = next(
+            (item for item in self.file_pane.filtered_files if item["path"] == file_path),
+            None,
+        )
+        self.info_pane.set_file(file_path, file_info=file_info)
+
+    def on_assign_tag(self):
+        """Assign a tag to the selected files."""
+        selected = self.file_pane.get_selected_files()
+        if not selected:
+            return
+
+        tag_names = [tag.name for tag in self.db.get_all_tags()]
+        if tag_names:
+            tag_name, ok = QInputDialog.getItem(
+                self,
+                "Assign Tag",
+                "Select tag:",
+                tag_names,
+                editable=True,
+            )
+        else:
+            tag_name, ok = QInputDialog.getText(self, "Assign Tag", "Tag name:")
+        if ok and tag_name:
+            for file_path in selected:
+                self.db.assign_tag_to_file(file_path, tag_name.strip())
+            self.load_tags()
+            self._refresh_selected_file_details()
+            self.refresh_view()
+
+    def on_remove_tag(self):
+        """Remove a tag from the selected files."""
+        selected = self.file_pane.get_selected_files()
+        if not selected:
+            return
+
+        available_tags = sorted({tag.name for file_path in selected for tag in self.db.get_tags_for_file(file_path)})
+        if not available_tags:
+            QMessageBox.information(self, "Remove Tag", "No tags are assigned to the selected files.")
+            return
+
+        tag_name, ok = QInputDialog.getItem(self, "Remove Tag", "Tag:", available_tags, editable=False)
+        if ok and tag_name:
+            for file_path in selected:
+                self.db.remove_tag_from_file(file_path, tag_name)
+            self.load_tags()
+            self._refresh_selected_file_details()
+            self.refresh_view()
+
+    def on_add_to_collection(self):
+        """Add selected files to a collection."""
+        selected = self.file_pane.get_selected_files()
+        if not selected:
+            return
+
+        collection_names = [collection.name for collection in self.db.get_all_collections()]
+        if collection_names:
+            collection_name, ok = QInputDialog.getItem(
+                self,
+                "Add to Collection",
+                "Select collection:",
+                collection_names,
+                editable=True,
+            )
+        else:
+            collection_name, ok = QInputDialog.getText(
+                self, "Add to Collection", "Collection name:"
+            )
+        if ok and collection_name:
+            for file_path in selected:
+                self.db.add_file_to_collection(file_path, collection_name.strip())
+            self.load_collections()
+            self._refresh_selected_file_details()
+            self.refresh_view()
+
+    def on_remove_from_collection(self):
+        """Remove selected files from a collection."""
+        selected = self.file_pane.get_selected_files()
+        if not selected:
+            return
+
+        available_collections = sorted(
+            {
+                collection.name
+                for file_path in selected
+                for collection in self.db.get_collections_for_file(file_path)
+            }
+        )
+        if not available_collections:
+            QMessageBox.information(
+                self,
+                "Remove from Collection",
+                "No collections are assigned to the selected files.",
+            )
+            return
+
+        collection_name, ok = QInputDialog.getItem(
+            self,
+            "Remove from Collection",
+            "Collection:",
+            available_collections,
+            editable=False,
+        )
+        if ok and collection_name:
+            for file_path in selected:
+                self.db.remove_file_from_collection(file_path, collection_name)
+            self._refresh_selected_file_details()
+            self.refresh_view()
+
+    def on_set_rating(self, rating_value: int):
+        """Set the rating on selected files."""
+        selected = self.file_pane.get_selected_files()
+        if not selected:
+            return
+        for file_path in selected:
+            self.db.set_rating(file_path, rating_value)
+        self._refresh_selected_file_details()
+        self.refresh_view()
+
+    def on_clear_rating(self):
+        """Clear the rating from selected files."""
+        selected = self.file_pane.get_selected_files()
+        if not selected:
+            return
+        for file_path in selected:
+            self.db.clear_rating(file_path)
+        self._refresh_selected_file_details()
+        self.refresh_view()
+
     def on_batch_rename(self):
         """Open batch rename dialog."""
         selected = self.file_pane.get_selected_files()
@@ -715,19 +1136,44 @@ class MainWindow(QWidget):
             renames = dialog.get_renames()
             for old_path, new_name in renames:
                 self.file_manager.rename(old_path, new_name)
-            self.file_pane.set_folder(self.current_path)
+            self.refresh_view()
             self.status_bar.showMessage(f"Renamed {len(renames)} files", 3000)
 
     def on_tag_selected(self, tag_name: str):
         """Handle tag selection - filter files by tag."""
-        # TODO: Filter files by tag from database
+        self.query_state.selected_tag = tag_name
+        self.tags_panel.set_active_tag(tag_name)
+        self.refresh_view()
         self.status_bar.showMessage(f"Filter by tag: {tag_name}", 3000)
+
+    def clear_tag_filter(self):
+        """Clear tag filtering."""
+        self.query_state.selected_tag = None
+        self.tags_panel.set_active_tag(None)
+        self.refresh_view()
+
+    def on_collection_selected(self, collection_name: str):
+        """Handle collection selection."""
+        self.query_state.selected_collection = collection_name
+        self.collections_panel.set_active_collection(collection_name)
+        self.refresh_view()
+        self.status_bar.showMessage(f"Filter by collection: {collection_name}", 3000)
+
+    def clear_collection_filter(self):
+        """Clear collection filtering."""
+        self.query_state.selected_collection = None
+        self.collections_panel.set_active_collection(None)
+        self.refresh_view()
 
     def load_tags(self):
         """Load tags from database."""
-        # TODO: Load from database
-        # For now, use sample tags
-        self.tags_panel.set_tags(["Favorites", "Work", "Personal", "Archive"])
+        self.tags_panel.set_tags(self.db.get_all_tags())
+        self.tags_panel.set_active_tag(self.query_state.selected_tag)
+
+    def load_collections(self):
+        """Load collections from database."""
+        self.collections_panel.set_collections(self.db.get_all_collections())
+        self.collections_panel.set_active_collection(self.query_state.selected_collection)
 
     def on_sort_changed(self, sort_by: str):
         """Handle sort criteria change."""
@@ -740,7 +1186,27 @@ class MainWindow(QWidget):
     def on_filter_changed(self, filter_text: str):
         """Handle filter by type change."""
         filter_map = {"All": "all", "Images": "image", "Videos": "video", "Sequences": "sequence"}
-        self.file_pane.set_filter_type(filter_map.get(filter_text, "all"))
+        self.query_state.file_type = filter_map.get(filter_text, "all")
+        self.file_pane.set_filter_type(self.query_state.file_type)
+        self._sync_source_label()
+
+    def on_scope_changed(self, text: str):
+        """Switch between folder-scoped and library-scoped metadata queries."""
+        self.query_state.scope = "library" if text == "Library" else "folder"
+        self.refresh_view()
+
+    def on_rating_filter_changed(self, text: str):
+        """Set the active rating filter."""
+        if text == "Any Rating":
+            self.query_state.selected_rating = None
+            self.query_state.unrated_only = False
+        elif text == "Unrated":
+            self.query_state.selected_rating = None
+            self.query_state.unrated_only = True
+        else:
+            self.query_state.unrated_only = False
+            self.query_state.selected_rating = int(text.split()[0])
+        self.refresh_view()
 
     def keyPressEvent(self, event: QKeyEvent):
         """Handle global keyboard shortcuts."""
@@ -760,3 +1226,15 @@ class MainWindow(QWidget):
                 return
 
         super().keyPressEvent(event)
+
+    def closeEvent(self, event: QCloseEvent):
+        """Clean up background workers when closing the main widget directly."""
+        try:
+            self.preview_pane.cleanup()
+        except Exception:
+            pass
+        try:
+            self.info_pane.cleanup()
+        except Exception:
+            pass
+        super().closeEvent(event)
