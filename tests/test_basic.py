@@ -346,6 +346,37 @@ class TestUI:
 
         assert "type:video" in window.path_label.text()
         assert "search:clip" in window.path_label.text()
+        assert window.breadcrumb_bar.current_path == "/tmp"
+        assert [segment[0] for segment in window.breadcrumb_bar.current_segments] == ["/", "tmp"]
+        window.close()
+
+    def test_breadcrumb_click_routes_to_folder_selection(self, monkeypatch, qtbot, tmp_path):
+        """Clicking a breadcrumb segment should reuse the standard folder selection flow."""
+        from gallerybrowser.views.main_window import MainWindow
+
+        _prepare_isolated_app_state(monkeypatch, tmp_path / "state")
+        nested = tmp_path / "projects" / "shots"
+        nested.mkdir(parents=True)
+
+        window = MainWindow()
+        qtbot.addWidget(window)
+        window.current_path = str(nested)
+        window.refresh_view()
+
+        selected = []
+
+        def capture(folder_path):
+            selected.append(folder_path)
+
+        window.breadcrumb_bar.path_selected.disconnect()
+        window.breadcrumb_bar.path_selected.connect(capture)
+        target_button = window.breadcrumb_bar.segment_buttons[-2]
+        target_path = str(nested.parent)
+        assert target_button.toolTip() == target_path
+
+        target_button.click()
+
+        assert selected == [target_path]
         window.close()
 
     def test_create_delete_tag_updates_panel_selection(self, monkeypatch, qtbot, tmp_path):

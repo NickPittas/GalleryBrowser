@@ -196,6 +196,66 @@ QSplitter::handle:hover {{
 }}
 
 /* ============================================================
+   BREADCRUMB BAR
+   ============================================================ */
+QWidget#breadcrumbBar {{
+    background-color: {_SURFACE};
+    border-bottom: 1px solid {_BORDER};
+}}
+
+QLabel#breadcrumbCaption {{
+    color: {_TEXT_SECONDARY};
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+
+QScrollArea#breadcrumbScrollArea {{
+    background: transparent;
+    border: none;
+}}
+
+QWidget#breadcrumbContent {{
+    background-color: {_SURFACE_2};
+    border: 1px solid {_BORDER};
+    border-radius: 8px;
+}}
+
+QPushButton#breadcrumbSegment {{
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: {_TEXT_PRIMARY};
+    padding: 4px 10px;
+    font-size: 13px;
+    font-weight: 500;
+}}
+
+QPushButton#breadcrumbSegment:hover {{
+    background-color: {_SURFACE_4};
+    border: 1px solid {_BORDER_HOVER};
+}}
+
+QPushButton#breadcrumbSegment:pressed {{
+    background-color: {_ACCENT_SURFACE};
+    border: 1px solid {_ACCENT_DIM};
+}}
+
+QLabel#breadcrumbCurrent {{
+    background-color: transparent;
+    color: {_TEXT_PRIMARY};
+    padding: 4px 10px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+
+QLabel#breadcrumbSeparator {{
+    color: {_TEXT_MUTED};
+    padding: 0 4px;
+}}
+
+/* ============================================================
    TREE WIDGET  (folder pane)
    ============================================================ */
 QTreeWidget {{

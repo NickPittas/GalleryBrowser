@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 import qtawesome as qta
 
 from gallerybrowser.views.batch_rename_dialog import BatchRenameDialog
+from gallerybrowser.views.breadcrumb_bar import BreadcrumbBar
 from gallerybrowser.views.collections_panel import CollectionsPanel
 from gallerybrowser.views.file_pane import FilePane
 from gallerybrowser.views.info_pane import InfoPane
@@ -151,6 +152,11 @@ class MainWindow(QWidget):
         # Add toolbar before the main splitter
         self.setup_toolbar()
         layout.addWidget(self.toolbar)
+
+        self.breadcrumb_bar = BreadcrumbBar()
+        self.breadcrumb_bar.path_selected.connect(self.on_folder_selected)
+        self.breadcrumb_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout.addWidget(self.breadcrumb_bar)
 
         layout.addWidget(self.main_splitter)
 
@@ -576,6 +582,7 @@ class MainWindow(QWidget):
             if not self.current_path:
                 self.file_pane.set_files([], current_folder="", source_label="No folder selected")
                 self.path_label.setText("No folder selected")
+                self.breadcrumb_bar.set_label("No folder selected")
                 self.update_status_count()
                 return
 
@@ -601,6 +608,7 @@ class MainWindow(QWidget):
                 self.file_pane.set_selection(retained_selection)
 
         self.path_label.setText(source_label)
+        self._sync_breadcrumb_bar()
         self.update_status_count()
 
     def _current_source_prefix(self) -> str:
@@ -612,9 +620,19 @@ class MainWindow(QWidget):
     def _sync_source_label(self):
         """Update the path/source label without rebuilding the current results."""
         self.path_label.setText(self._build_source_label(self._current_source_prefix()))
+        self._sync_breadcrumb_bar()
+
+    def _sync_breadcrumb_bar(self):
+        """Keep the top breadcrumb in sync with the active browsing scope."""
+        if self.query_state.scope == "folder" and self.current_path:
+            self.breadcrumb_bar.set_path(self.current_path)
+        elif self.query_state.scope == "library":
+            self.breadcrumb_bar.set_label("Library")
+        else:
+            self.breadcrumb_bar.set_label("No folder selected")
 
     def _build_source_label(self, prefix: str) -> str:
-        """Build a human-readable source label for the status bar."""
+        """Build a human-readable source label for the status bar summary."""
         filters = []
         if self.query_state.selected_tag:
             filters.append(f"tag:{self.query_state.selected_tag}")
@@ -790,7 +808,7 @@ class MainWindow(QWidget):
         status_bar.setFixedHeight(24)
         status_bar.setSizeGripEnabled(False)
 
-        # Left side: Current path
+        # Left side: Source / filters summary
         self.path_label = QLabel("No folder selected")
         self.path_label.setStyleSheet("padding: 0px; margin: 0px;")
         status_bar.addWidget(self.path_label, stretch=1)
