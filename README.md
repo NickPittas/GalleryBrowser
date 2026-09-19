@@ -21,10 +21,16 @@ A Linux-native browser for images, videos, and image sequences with DB-backed ta
 
 ### Flatpak (Recommended)
 
+Download `GalleryBrowser-0.1.0.x86_64.flatpak` from the [latest release](https://github.com/NickPittas/GalleryBrowser/releases), then:
+
 ```bash
-flatpak install flathub com.nickpittas.gallerybrowser
-flatpak run com.nickpittas.gallerybrowser
+flatpak install --user GalleryBrowser-0.1.0.x86_64.flatpak
+flatpak run io.github.nickpittas.GalleryBrowser
 ```
+
+The bundle pulls the KDE 6.10 runtime from Flathub automatically, and all video
+codecs (MP4/MOV, H.264/H.265) ship inside the sandbox — no system packages
+required. Once installed, the app appears in your application menu.
 
 ### From Source
 

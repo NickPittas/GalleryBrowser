@@ -159,9 +159,9 @@ modules:
       # Install metainfo
       - install -Dm644 flatpak/io.github.nickpittas.GalleryBrowser.metainfo.xml
         ${FLATPAK_DEST}/share/metainfo/io.github.nickpittas.GalleryBrowser.metainfo.xml
-      # Install icon (scalable SVG)
-      - install -Dm644 flatpak/io.github.nickpittas.GalleryBrowser.svg
-        ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.nickpittas.GalleryBrowser.svg
+      # Install icon (512px PNG; ponytail: SVG export trips flatpak-validate-icon's glycin loader)
+      - install -Dm644 flatpak/io.github.nickpittas.GalleryBrowser.png
+        ${FLATPAK_DEST}/share/icons/hicolor/512x512/apps/io.github.nickpittas.GalleryBrowser.png
     sources:
       - type: dir
         path: ..

@@ -49,10 +49,13 @@ database.sqlite
 thumbnails/
 
 # Flatpak build artifacts
-flatpak/.flatpak-builder/
-flatpak/build-dir/
-flatpak/repo/
-flatpak/*.flatpak
+.flatpak-builder/
+build-dir/
+.flatpak-repo/
+*.flatpak
+
+# Build logs
+*.log
 
 # OS
 .DS_Store

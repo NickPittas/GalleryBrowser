@@ -12,6 +12,15 @@ if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
 fi
 
 mkdir -p "${LOCAL_STATE_DIR}/cache" "${LOCAL_STATE_DIR}/config"
+
+# ponytail: gst-inspect exits 0 even for missing elements, so grep; can't pip-install codecs
+if ! gst-inspect-1.0 qtdemux 2>/dev/null | grep -q Factory || ! gst-inspect-1.0 avdec_h264 2>/dev/null | grep -q Factory; then
+    echo "Missing GStreamer plugins — video preview (MP4/MOV) will not work." >&2
+    echo "Install, then re-run:" >&2
+    echo "  Arch:    sudo pacman -S --needed gst-plugins-base gst-plugins-good gst-libav" >&2
+    echo "  Debian:  sudo apt install gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav" >&2
+    exit 1
+fi
 export XDG_CACHE_HOME="${LOCAL_STATE_DIR}/cache"
 export XDG_CONFIG_HOME="${LOCAL_STATE_DIR}/config"
 
