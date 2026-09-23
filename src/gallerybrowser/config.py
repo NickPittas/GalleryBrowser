@@ -41,7 +41,7 @@ class Config:
     # App info
     APP_NAME = "gallerybrowser"
     APP_AUTHOR = "NickPittas"
-    VERSION = "0.1.0"
+    VERSION = "0.1.8"
 
     # Thumbnail sizes
     THUMBNAIL_SIZES = [64, 128, 256, 512]

@@ -1,7 +1,7 @@
 """GalleryBrowser application class."""
 
 from PyQt6.QtGui import QAction, QKeySequence
-from PyQt6.QtWidgets import QMainWindow
+from PyQt6.QtWidgets import QApplication, QMainWindow
 
 import qtawesome as qta
 
@@ -78,3 +78,5 @@ class GalleryBrowserApp(QMainWindow):
         except Exception:
             pass
         super().closeEvent(event)
+        if event.isAccepted():
+            QApplication.quit()

@@ -39,6 +39,11 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.1.8" date="2026-09-23">
+      <description>
+        <p>Restore the original file-drag payload and prevent hidden processes from blocking relaunch.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-02-27">
       <description>
         <p>Initial release with core gallery browsing, preview, and file management features.</p>

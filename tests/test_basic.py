@@ -99,7 +99,62 @@ class TestConfig:
         monkeypatch.setattr(Config, "get_cache_dir", classmethod(lambda cls: cache_dir))
 
         instance = SingleInstance()
+        another = SingleInstance()
         assert Path(instance.lock_path).parent == cache_dir / "locks"
+        assert instance.try_lock()
+        assert not another.try_lock()
+        instance.unlock()
+        assert another.try_lock()
+        another.unlock()
+
+        import os
+        import subprocess
+        import sys
+
+        crash_lock = cache_dir / "locks" / "crashed.lock"
+        child = (
+            "import fcntl, os, sys; "
+            "fd=os.open(sys.argv[1], os.O_CREAT | os.O_RDWR, 0o600); "
+            "fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB); os._exit(0)"
+        )
+        subprocess.run([sys.executable, "-c", child, str(crash_lock)], check=True)
+        after_crash = SingleInstance()
+        after_crash.lock_path = str(crash_lock)
+        assert after_crash.try_lock()
+        after_crash.unlock()
+
+    def test_closing_main_window_quits_app(self, monkeypatch):
+        from PyQt6.QtCore import QTimer
+        from PyQt6.QtWidgets import QApplication, QToolBar, QWidget
+        import gallerybrowser.app as app_module
+
+        class Pane:
+            def cleanup(self):
+                pass
+
+        class DummyMainWindow(QWidget):
+            def __init__(self):
+                super().__init__()
+                self.toolbar = QToolBar(self)
+                self.preview_pane = Pane()
+                self.info_pane = Pane()
+
+        monkeypatch.setattr(app_module, "MainWindow", DummyMainWindow)
+        monkeypatch.setattr(app_module.GalleryBrowserApp, "create_menu_bar", lambda self: None)
+        app = QApplication.instance() or QApplication([])
+        quit_on_last_window_closed = app.quitOnLastWindowClosed()
+        app.setQuitOnLastWindowClosed(False)
+        main = app_module.GalleryBrowserApp()
+        other = QWidget()
+        main.show()
+        other.show()
+        QTimer.singleShot(0, main.close)
+        QTimer.singleShot(500, lambda: app.exit(17))
+        try:
+            assert app.exec() == 0
+        finally:
+            other.close()
+            app.setQuitOnLastWindowClosed(quit_on_last_window_closed)
 
 
 class TestDatabase:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gallerybrowser"
-version = "0.1.0"
+version = "0.1.8"
 description = "Linux-native asset management application for images and videos"
 readme = "README.md"
 license = "MIT"

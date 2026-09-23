@@ -52,17 +52,15 @@ def main():
     gallery_app = GalleryBrowserApp()
     gallery_app.show()
 
-    # Ensure clean shutdown
-    def cleanup():
-        """Cleanup resources on exit."""
-        db_manager.dispose()
-        single_instance.unlock()
-
-    app.aboutToQuit.connect(cleanup)
-
-    # Run application
-    sys.exit(app.exec())
+    # Always release the lock and database after the event loop exits.
+    try:
+        return app.exec()
+    finally:
+        try:
+            db_manager.dispose()
+        finally:
+            single_instance.unlock()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
