@@ -21,10 +21,10 @@ A Linux-native browser for images, videos, and image sequences with DB-backed ta
 
 ### Flatpak (Recommended)
 
-Download `GalleryBrowser-0.1.8.x86_64.flatpak` from the [latest release](https://github.com/NickPittas/GalleryBrowser/releases), then:
+Download `GalleryBrowser-0.1.9.x86_64.flatpak` from the [latest release](https://github.com/NickPittas/GalleryBrowser/releases), then:
 
 ```bash
-flatpak install --user GalleryBrowser-0.1.8.x86_64.flatpak
+flatpak install --user GalleryBrowser-0.1.9.x86_64.flatpak
 flatpak run io.github.nickpittas.GalleryBrowser
 ```
 

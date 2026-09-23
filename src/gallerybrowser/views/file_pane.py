@@ -41,13 +41,13 @@ class _CtrlScrubWorker(QThread):
     -------
     pipeline_ready(int)
         Emitted once the pipeline is prerolled with the duration in nanoseconds.
-    frame_ready(QPixmap, float)
-        Emitted each time a new frame is decoded, with the pixmap and the
+    frame_ready(QImage, float)
+        Emitted each time a new frame is decoded, with the image and the
         seek ratio (0.0–1.0) it corresponds to.
     """
 
     pipeline_ready = pyqtSignal(int)  # duration_ns
-    frame_ready = pyqtSignal(QPixmap, float)  # pixmap, ratio
+    frame_ready = pyqtSignal(QImage, float)  # image, ratio
 
     def __init__(self, file_path: str, thumb_size: int, parent=None):
         super().__init__(parent)
@@ -139,6 +139,8 @@ class _CtrlScrubWorker(QThread):
         gi.require_version("Gst", "1.0")
         gi.require_version("GstApp", "1.0")
         from gi.repository import Gst, GstApp  # noqa: F401
+
+        Gst.init(None)
 
         # Pre-warm the page cache so moov-at-end doesn't stall qtdemux
         self._pre_read_moov()
@@ -317,9 +319,8 @@ class _CtrlScrubWorker(QThread):
                 finally:
                     buf.unmap(mapinfo)
 
-                pixmap = QPixmap.fromImage(qimg)
-                if not pixmap.isNull():
-                    self.frame_ready.emit(pixmap, ratio)
+                if not qimg.isNull():
+                    self.frame_ready.emit(qimg, ratio)
 
             except Exception:
                 pass
@@ -524,15 +525,15 @@ class FileItemWidget(QWidget):
             FileItemWidget._gst_appsink = worker._appsink
         FileItemWidget._gst_duration_ns = duration_ns
 
-    def _on_scrub_frame(self, pixmap: QPixmap, ratio: float):
+    def _on_scrub_frame(self, image: QImage, ratio: float):
         """Called (on main thread) when a scrub frame has been decoded."""
         if FileItemWidget._gst_owner is not self or not self._ctrl_scrubbing:
             return
-        if pixmap.isNull():
+        if image.isNull():
             return
 
-        # Scale to thumbnail size
-        scaled = pixmap.scaled(
+        # ponytail: QPixmap belongs to the GUI thread; pass QImage from the worker.
+        scaled = QPixmap.fromImage(image).scaled(
             self.thumb_size,
             self.thumb_size,
             Qt.AspectRatioMode.KeepAspectRatio,
