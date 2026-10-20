@@ -161,7 +161,9 @@ impl MediaSource for Synth {
 
     fn video_frame(&self, req: FrameRequest) -> filmcraft_media::Result<Arc<VideoFrame>> {
         let delay = self.delay_ms.load(Ordering::Relaxed);
-        for _ in 0..delay {
+        // Wall-clock deadline, not N sleeps: a 1 ms sleep overshoots by several ms on loaded macOS CI.
+        let until = Instant::now() + Duration::from_millis(delay);
+        while Instant::now() < until {
             if filmcraft_media::cancel::cancelled() {
                 return Err(MediaError::Cancelled);
             }

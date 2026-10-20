@@ -1820,10 +1820,10 @@ mod tests {
     fn date_formatting_is_total() {
         assert_eq!(format_date(None), "—");
         assert_eq!(format_date(Some(UNIX_EPOCH - Duration::from_secs(5))), "—");
-        assert_eq!(
-            format_date(Some(UNIX_EPOCH + Duration::from_secs(u64::MAX / 2))),
-            "—"
-        );
+        // `SystemTime` addition panics on overflow (Windows' range is far smaller than u64).
+        if let Some(far) = UNIX_EPOCH.checked_add(Duration::from_secs(u64::MAX / 2)) {
+            assert_eq!(format_date(Some(far)), "—");
+        }
         let s = format_date(Some(UNIX_EPOCH + Duration::from_secs(1_700_000_000)));
         assert_eq!(s.len(), 16);
         assert!(s.starts_with("2023-11-1"));

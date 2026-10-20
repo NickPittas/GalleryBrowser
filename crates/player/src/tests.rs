@@ -344,7 +344,10 @@ fn frames_of_a_previous_load_are_never_returned() {
     p.load(a, true);
     let t0 = Instant::now();
     p.tick(t0);
-    std::thread::sleep(Duration::from_millis(60));
+    assert!(
+        wait_until(|| slow.decoded.load(std::sync::atomic::Ordering::Relaxed) >= 1),
+        "the old source decoded its first frame"
+    );
     for k in 0..3 {
         p.tick(at(t0, 0.1 * f64::from(k)));
     }

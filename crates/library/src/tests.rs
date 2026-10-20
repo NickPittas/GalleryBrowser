@@ -5,8 +5,14 @@ use gallerybrowser_core::{Entry, MediaKind};
 
 use super::*;
 
+/// `dir` joined with a `/`-separated relative path, one component at a time so every separator is
+/// the platform's (the library keys annotations by exact path string).
+fn at(dir: &Path, rel: &str) -> PathBuf {
+    rel.split('/').fold(dir.to_path_buf(), |p, c| p.join(c))
+}
+
 fn touch(dir: &Path, name: &str) -> PathBuf {
-    let p = dir.join(name);
+    let p = at(dir, name);
     if let Some(parent) = p.parent() {
         fs::create_dir_all(parent).unwrap();
     }
@@ -284,7 +290,7 @@ fn relink_file_and_directory() {
     lib.set_rating(std::slice::from_ref(&b), 3).unwrap();
 
     // single file rename
-    let a2 = d.join("old/a2.mov");
+    let a2 = at(d, "old/a2.mov");
     fs::rename(&a, &a2).unwrap();
     lib.relink(&[(a.clone(), a2.clone())]).unwrap();
     assert_eq!(lib.annotations(&a), Annotations::default());
@@ -294,10 +300,10 @@ fn relink_file_and_directory() {
     // directory move relinks everything below it
     fs::rename(d.join("old"), d.join("new")).unwrap();
     lib.relink(&[(d.join("old"), d.join("new"))]).unwrap();
-    let b2 = d.join("new/sub/b.png");
+    let b2 = at(d, "new/sub/b.png");
     assert_eq!(lib.annotations(&b2).rating, 3);
     assert_eq!(
-        lib.annotations(&d.join("new/a2.mov")).collections,
+        lib.annotations(&at(d, "new/a2.mov")).collections,
         vec!["col".to_string()]
     );
     assert_eq!(lib.annotations(&b), Annotations::default());
