@@ -1,0 +1,27 @@
+[package]
+name = "gallerybrowser-ui-egui"
+description = "The GalleryBrowser egui frontend: panels, viewer, transport, dialogs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gallerybrowser-core = { workspace = true }
+gallerybrowser-fileops = { workspace = true }
+gallerybrowser-media = { workspace = true }
+gallerybrowser-library = { workspace = true }
+gallerybrowser-player = { workspace = true }
+craft-ui = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+rfd = { workspace = true }
+open = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

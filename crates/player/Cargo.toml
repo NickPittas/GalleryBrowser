@@ -1,0 +1,23 @@
+[package]
+name = "gallerybrowser-player"
+description = "UI-free playback engine for video, image sequences and audio (cpal)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gallerybrowser-media = { workspace = true }
+filmcraft-time = { workspace = true }
+filmcraft-frame = { workspace = true }
+filmcraft-media = { workspace = true }
+cpal = { workspace = true }
+crossbeam-channel = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
