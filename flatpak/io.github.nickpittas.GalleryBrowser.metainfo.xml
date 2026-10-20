@@ -38,6 +38,11 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.2.1" date="2026-10-21">
+      <description>
+        <p>Fix single-instance file forwarding on macOS and case-only renames on case-insensitive filesystems.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-21">
       <description>
         <p>Rewritten in Rust on the ArtCraft stack (egui, wgpu, pure-Rust media) with video-first browsing and playback.</p>
