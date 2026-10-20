@@ -135,6 +135,9 @@ fn fill(entry: &Entry, m: &mut MediaMetadata) {
     if !ext.is_empty() {
         m.format = Some(ext.to_ascii_uppercase());
     }
+    if entry.kind == MediaKind::Other {
+        return;
+    }
 
     match crate::open(&probe_path) {
         Ok(src) => fill_from_info(m, src.info()),

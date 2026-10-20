@@ -59,6 +59,11 @@ pub struct Settings {
     pub recents: Vec<PathBuf>,
     pub recents_max: usize,
     pub last_folder: Option<PathBuf>,
+    /// List every file, not only media.
+    pub show_all_files: bool,
+    /// Show a second file pane next to the first.
+    pub dual_pane: bool,
+    pub last_folder_secondary: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -84,6 +89,9 @@ impl Default for Settings {
             recents: Vec::new(),
             recents_max: 15,
             last_folder: None,
+            show_all_files: false,
+            dual_pane: false,
+            last_folder_secondary: None,
         }
     }
 }
@@ -284,6 +292,22 @@ mod tests {
         };
         s.save(&dirs).expect("save again");
         assert!(Settings::load(&dirs).muted);
+    }
+
+    #[test]
+    fn dual_pane_fields_default_and_roundtrip() {
+        let d = Settings::default();
+        assert!(!d.show_all_files && !d.dual_pane && d.last_folder_secondary.is_none());
+        let t = tempfile::tempdir().expect("tempdir");
+        let dirs = dirs_in(t.path());
+        let s = Settings {
+            show_all_files: true,
+            dual_pane: true,
+            last_folder_secondary: Some(PathBuf::from("/second")),
+            ..Settings::default()
+        };
+        s.save(&dirs).expect("save");
+        assert_eq!(Settings::load(&dirs), s);
     }
 
     #[test]

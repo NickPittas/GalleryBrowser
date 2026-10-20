@@ -14,6 +14,8 @@
 - `Ctrl+V`: Paste into current folder
 - `Delete`: Move selected files to trash
 - `F2`: Rename selected file
+- `Ctrl+Shift+C`: Copy the selection into the other pane's folder (second pane on)
+- `Ctrl+Shift+M`: Move the selection into the other pane's folder (second pane on)
 
 ## Selection
 
@@ -36,6 +38,8 @@
 - `Space`: Open the focused / selected item in the viewer
 - `Ctrl+P`: Show / hide the preview pane
 - `F1`: Show the shortcuts list
+- `F3`: Show / hide the second file pane
+- `Tab`: Switch the active pane (the folder tree navigates the active pane)
 - `Arrows`, `Home`, `End`, `PageUp`, `PageDown`: Move focus in the file pane (`Shift` extends the selection)
 - `Enter`: Open folder / open the fullscreen viewer
 

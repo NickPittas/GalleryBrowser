@@ -5,12 +5,13 @@ use gallerybrowser_core::FilterScope;
 use crate::state::{Action, AppState};
 use crate::theme;
 
-/// Clickable path segments of `state.nav.current` + back/forward/up buttons; click pushes Action::Navigate.
+/// Clickable path segments of `state.pane().nav.current` + back/forward/up buttons; click pushes Action::Navigate.
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
-        let has_back = !state.nav.back.is_empty();
-        let has_forward = !state.nav.forward.is_empty();
+        let has_back = !state.pane().nav.back.is_empty();
+        let has_forward = !state.pane().nav.forward.is_empty();
         let has_parent = state
+            .pane()
             .nav
             .current
             .as_ref()
@@ -43,7 +44,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
         ui.spacing_mut().item_spacing.x = 6.0;
         theme::group_separator(ui);
 
-        match (&state.filters.scope, &state.nav.current) {
+        match (&state.pane().filters.scope, &state.pane().nav.current) {
             (FilterScope::Library, _) => {
                 ui.label(egui::RichText::new("Library").strong());
             }

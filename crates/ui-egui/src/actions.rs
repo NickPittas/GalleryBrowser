@@ -55,23 +55,26 @@ pub fn dispatch(state: &mut AppState, ctx: &egui::Context, action: Action) {
         Action::Navigate(p) => navigate(state, p),
         Action::OpenFolderDialog => open_folder_dialog(state, ctx),
         Action::Back => {
-            if let Some(prev) = state.nav.back.pop() {
-                if let Some(cur) = state.nav.current.clone() {
-                    state.nav.forward.push(cur);
+            if let Some(prev) = state.pane_mut().nav.back.pop() {
+                if let Some(cur) = state.pane().nav.current.clone() {
+                    state.pane_mut().nav.forward.push(cur);
                 }
-                set_current(state, prev, false);
+                let pane = state.active;
+                set_current(state, pane, prev, false);
             }
         }
         Action::Forward => {
-            if let Some(next) = state.nav.forward.pop() {
-                if let Some(cur) = state.nav.current.clone() {
-                    state.nav.back.push(cur);
+            if let Some(next) = state.pane_mut().nav.forward.pop() {
+                if let Some(cur) = state.pane().nav.current.clone() {
+                    state.pane_mut().nav.back.push(cur);
                 }
-                set_current(state, next, false);
+                let pane = state.active;
+                set_current(state, pane, next, false);
             }
         }
         Action::Up => {
             let parent = state
+                .pane()
                 .nav
                 .current
                 .as_ref()
@@ -83,23 +86,24 @@ pub fn dispatch(state: &mut AppState, ctx: &egui::Context, action: Action) {
         }
         Action::Refresh => {
             state.tree_generation = state.tree_generation.wrapping_add(1);
-            refresh_view(state, true);
+            refresh_all(state, true);
         }
 
         // ---- selection ----
         Action::Select { path, mode } => select(state, path, mode),
         Action::SelectAll => {
-            state.selection.items = state.entries.iter().map(|e| e.path.clone()).collect();
-            if state.selection.focused.is_none() {
-                state.selection.focused = state.entries.first().map(|e| e.path.clone());
+            let p = state.pane_mut();
+            p.selection.items = p.entries.iter().map(|e| e.path.clone()).collect();
+            if p.selection.focused.is_none() {
+                p.selection.focused = p.entries.first().map(|e| e.path.clone());
             }
-            if state.selection.anchor.is_none() {
-                state.selection.anchor = state.selection.focused.clone();
+            if p.selection.anchor.is_none() {
+                p.selection.anchor = p.selection.focused.clone();
             }
         }
         Action::ClearSelection => {
-            state.selection.items.clear();
-            state.selection.anchor = None;
+            state.pane_mut().selection.items.clear();
+            state.pane_mut().selection.anchor = None;
         }
         Action::MoveFocus { delta, extend } => move_focus(state, delta, extend),
         Action::Activate(p) => activate(state, p),
@@ -142,7 +146,9 @@ pub fn dispatch(state: &mut AppState, ctx: &egui::Context, action: Action) {
             }
         }
         Action::BeginNewFolder => {
-            if state.nav.current.is_some() && state.filters.scope == FilterScope::Folder {
+            if state.pane().nav.current.is_some()
+                && state.pane().filters.scope == FilterScope::Folder
+            {
                 state.dialogs.new_folder = Some("New Folder".to_string());
             } else {
                 state.error("Open a folder (Folder scope) before creating a new folder");
@@ -219,9 +225,16 @@ pub fn dispatch(state: &mut AppState, ctx: &egui::Context, action: Action) {
                 Err(e) => state.error(format!("Could not delete tag: {e}")),
             }
             bump_library(state);
-            if state.filters.query.tags.contains(&name) {
-                state.filters.query.tags.retain(|t| *t != name);
-                refresh_view(state, true);
+            for i in 0..state.panes.len() {
+                if state.pane_at(i).filters.query.tags.contains(&name) {
+                    state
+                        .pane_at_mut(i)
+                        .filters
+                        .query
+                        .tags
+                        .retain(|t| *t != name);
+                    refresh_view(state, i, true);
+                }
             }
         }
         Action::AddToCollection(name) => {
@@ -256,47 +269,58 @@ pub fn dispatch(state: &mut AppState, ctx: &egui::Context, action: Action) {
                 Err(e) => state.error(format!("Could not delete collection: {e}")),
             }
             bump_library(state);
-            if state.filters.query.collection.as_deref() == Some(name.as_str()) {
-                state.filters.query.collection = None;
-                refresh_view(state, true);
+            for i in 0..state.panes.len() {
+                if state.pane_at(i).filters.query.collection.as_deref() == Some(name.as_str()) {
+                    state.pane_at_mut(i).filters.query.collection = None;
+                    refresh_view(state, i, true);
+                }
             }
         }
 
         // ---- view / filters ----
         Action::SetScope(scope) => {
-            if state.filters.scope != scope {
-                state.filters.scope = scope;
-                refresh_view(state, true);
+            if state.pane().filters.scope != scope {
+                state.pane_mut().filters.scope = scope;
+                refresh_active(state, true);
             }
         }
         Action::SetQuery(q) => {
-            state.filters.query = q;
-            refresh_view(state, true);
+            state.pane_mut().filters.query = q;
+            refresh_active(state, true);
         }
         Action::SetSearch(s) => {
-            state.filters.search = s;
-            refresh_view(state, false);
+            state.pane_mut().filters.search = s;
+            refresh_active(state, false);
         }
         Action::SetKinds(k) => {
-            state.filters.kinds = k;
-            refresh_view(state, false);
+            state.pane_mut().filters.kinds = k;
+            refresh_active(state, false);
         }
         Action::SetSort { key, ascending } => {
             state.settings.sort_key = key;
             state.settings.sort_ascending = ascending;
-            refresh_view(state, false);
+            refresh_all(state, false);
         }
         Action::SetViewMode(m) => state.settings.view_mode = m,
         Action::SetThumbnailSize(s) => {
             state.settings.thumbnail_size = s.clamp(64, 512);
-            refresh_view(state, false);
+            refresh_all(state, false);
         }
         Action::SetCollapseSequences(b) => {
             // Goes through the one pipeline so active library filters still apply (Python bug #3).
             state.settings.collapse_sequences = b;
-            refresh_view(state, true);
+            refresh_all(state, true);
         }
         Action::TogglePreviewPane => state.settings.show_preview = !state.settings.show_preview,
+        Action::FocusPane(i) => state.set_active(i),
+        Action::ToggleDualPane => toggle_dual_pane(state),
+        Action::SetShowAllFiles(b) => {
+            state.settings.show_all_files = b;
+            save_settings(state);
+            refresh_all(state, true);
+        }
+        Action::CopyToOtherPane => transfer_to_other_pane(state, true),
+        Action::MoveToOtherPane => transfer_to_other_pane(state, false),
         Action::AddFavorite(p) => {
             if !state.settings.favorites.contains(&p) {
                 state.settings.favorites.push(p);
@@ -324,66 +348,78 @@ pub fn dispatch(state: &mut AppState, ctx: &egui::Context, action: Action) {
 // refresh pipeline
 // ======================================================================================
 
-/// Rescan (if `rescan`) and rebuild `state.entries`; reconcile selection; request thumbnails.
-pub fn refresh_view(state: &mut AppState, rescan: bool) {
+/// Rescan (if `rescan`) and rebuild pane `pane`'s entries; reconcile its selection; request thumbnails.
+pub fn refresh_view(state: &mut AppState, pane: usize, rescan: bool) {
+    let pane = if pane < state.panes.len() { pane } else { 0 };
+    let scope = state.pane_at(pane).filters.scope;
     if rescan {
-        state.scan_note = None;
-        state.scanned = match state.filters.scope {
-            FilterScope::Folder => scan_current(state),
-            FilterScope::Library => library_entries(state),
+        state.pane_at_mut(pane).scan_note = None;
+        let scanned = match scope {
+            FilterScope::Folder => scan_current(state, pane),
+            FilterScope::Library => library_entries(state, pane),
         };
+        state.pane_at_mut(pane).scanned = scanned;
     }
 
-    let mut entries: Vec<Entry> = state.scanned.clone();
-    if state.filters.scope == FilterScope::Folder && !state.filters.query.is_empty() {
-        entries = state.library.filter_entries(entries, &state.filters.query);
-    }
-    if !state.filters.kinds.is_empty() {
-        entries.retain(|e| state.filters.kinds.contains(&e.kind));
-    }
-    let needle = state.filters.search.trim().to_lowercase();
-    if !needle.is_empty() {
-        entries.retain(|e| e.name.to_lowercase().contains(&needle));
+    let mut entries: Vec<Entry> = state.pane_at(pane).scanned.clone();
+    {
+        let filters = &state.pane_at(pane).filters;
+        if scope == FilterScope::Folder && !filters.query.is_empty() {
+            entries = state.library.filter_entries(entries, &filters.query);
+        }
+        if !filters.kinds.is_empty() {
+            entries.retain(|e| filters.kinds.contains(&e.kind));
+        }
+        let needle = filters.search.trim().to_lowercase();
+        if !needle.is_empty() {
+            entries.retain(|e| e.name.to_lowercase().contains(&needle));
+        }
     }
     sort_entries(
         &mut entries,
         state.settings.sort_key,
         state.settings.sort_ascending,
     );
-    state.entries = entries;
+    let p = state.pane_at_mut(pane);
+    p.entries = entries;
 
     // reconcile selection / anchor / focus with what is visible
-    let visible: HashSet<&PathBuf> = state.entries.iter().map(|e| &e.path).collect();
-    state.selection.items.retain(|p| visible.contains(p));
-    if state
-        .selection
+    let visible: HashSet<&PathBuf> = p.entries.iter().map(|e| &e.path).collect();
+    p.selection.items.retain(|q| visible.contains(q));
+    if p.selection
         .anchor
         .as_ref()
-        .is_some_and(|p| !visible.contains(p))
+        .is_some_and(|q| !visible.contains(q))
     {
-        state.selection.anchor = None;
+        p.selection.anchor = None;
     }
-    if state
-        .selection
+    if p.selection
         .focused
         .as_ref()
-        .is_some_and(|p| !visible.contains(p))
+        .is_some_and(|q| !visible.contains(q))
     {
-        state.selection.focused = None;
+        p.selection.focused = None;
     }
     drop(visible);
 
-    if let Some(p) = state.pending_select.take()
-        && state.entries.iter().any(|e| e.path == p)
+    if let Some(sel) = p.pending_select.take()
+        && p.entries.iter().any(|e| e.path == sel)
     {
-        state.selection.items = BTreeSet::from([p.clone()]);
-        state.selection.anchor = Some(p.clone());
-        state.selection.focused = Some(p);
+        p.selection.items = BTreeSet::from([sel.clone()]);
+        p.selection.anchor = Some(sel.clone());
+        p.selection.focused = Some(sel);
     }
 
+    // `begin_batch` drops queued thumbnail work for every pane, so each pane re-requests its cards.
     state.thumbs.begin_batch();
+    for pane_state in &mut state.panes {
+        pane_state.view.reset_requests();
+    }
     {
-        let keep: HashSet<&Path> = state.entries.iter().map(|e| e.path.as_path()).collect();
+        let mut keep: HashSet<&Path> = HashSet::new();
+        for pane_state in &state.panes {
+            keep.extend(pane_state.entries.iter().map(|e| e.path.as_path()));
+        }
         state.textures.retain(&|p: &Path| keep.contains(p));
     }
     state.poll_until = Instant::now() + Duration::from_secs(5);
@@ -394,16 +430,30 @@ pub fn refresh_view(state: &mut AppState, rescan: bool) {
     sync_focus(state);
 }
 
+/// Refresh the active pane.
+fn refresh_active(state: &mut AppState, rescan: bool) {
+    let pane = state.active;
+    refresh_view(state, pane, rescan);
+}
+
+/// Refresh every shown pane (settings that affect all panes changed).
+pub fn refresh_all(state: &mut AppState, rescan: bool) {
+    for i in 0..state.visible_panes() {
+        refresh_view(state, i, rescan);
+    }
+}
+
 fn scan_options(state: &AppState) -> ScanOptions {
     ScanOptions {
         show_hidden: state.settings.show_hidden,
         collapse_sequences: state.settings.collapse_sequences,
+        show_all_files: state.settings.show_all_files,
         ..ScanOptions::default()
     }
 }
 
-fn scan_current(state: &mut AppState) -> Vec<Entry> {
-    let Some(dir) = state.nav.current.clone() else {
+fn scan_current(state: &mut AppState, pane: usize) -> Vec<Entry> {
+    let Some(dir) = state.pane_at(pane).nav.current.clone() else {
         return Vec::new();
     };
     match scan_folder(&dir, &scan_options(state)) {
@@ -417,8 +467,8 @@ fn scan_current(state: &mut AppState) -> Vec<Entry> {
 
 /// Library scope: catalog paths matching the query that still exist, as browsable entries.
 /// Sequence identities (`shot_####.exr`) are resolved by scanning their folder once.
-fn library_entries(state: &mut AppState) -> Vec<Entry> {
-    let paths = state.library.query(&state.filters.query);
+fn library_entries(state: &mut AppState, pane: usize) -> Vec<Entry> {
+    let paths = state.library.query(&state.pane_at(pane).filters.query);
     let opts = scan_options(state);
     let mut folders: HashMap<PathBuf, Vec<Entry>> = HashMap::new();
     let mut out = Vec::with_capacity(paths.len());
@@ -470,7 +520,7 @@ fn library_entries(state: &mut AppState) -> Vec<Entry> {
         }
     }
     if skipped > 0 {
-        state.scan_note = Some(format!(
+        state.pane_at_mut(pane).scan_note = Some(format!(
             "{skipped} catalog item(s) are missing or unsupported"
         ));
     }
@@ -479,7 +529,7 @@ fn library_entries(state: &mut AppState) -> Vec<Entry> {
 
 /// Push the focused entry to the preview pane and metadata worker when it changed.
 fn sync_focus(state: &mut AppState) {
-    let focused = state.selection.focused.clone();
+    let focused = state.pane().selection.focused.clone();
 
     if state.synced_meta != focused {
         state.synced_meta = focused.clone();
@@ -507,10 +557,16 @@ fn sync_focus(state: &mut AppState) {
 // ======================================================================================
 
 fn navigate(state: &mut AppState, p: PathBuf) {
+    let pane = state.active;
+    navigate_pane(state, pane, p);
+}
+
+/// Open `p` (folder, or a file's parent with the file selected) in pane `pane`.
+fn navigate_pane(state: &mut AppState, pane: usize, p: PathBuf) {
     if p.is_file() {
         if let Some(parent) = p.parent().map(Path::to_path_buf) {
-            state.pending_select = Some(p);
-            navigate(state, parent);
+            state.pane_at_mut(pane).pending_select = Some(p);
+            navigate_pane(state, pane, parent);
         }
         return;
     }
@@ -518,32 +574,38 @@ fn navigate(state: &mut AppState, p: PathBuf) {
         state.error(format!("Not a folder: {}", p.display()));
         return;
     }
-    if state.nav.current.as_deref() == Some(p.as_path()) {
-        refresh_view(state, true);
+    if state.pane_at(pane).nav.current.as_deref() == Some(p.as_path()) {
+        refresh_view(state, pane, true);
         return;
     }
-    if let Some(cur) = state.nav.current.clone() {
-        state.nav.back.push(cur);
+    let nav = &mut state.pane_at_mut(pane).nav;
+    if let Some(cur) = nav.current.clone() {
+        nav.back.push(cur);
     }
-    state.nav.forward.clear();
-    set_current(state, p, true);
+    nav.forward.clear();
+    set_current(state, pane, p, true);
 }
 
 /// Make `p` the current folder (history already adjusted by the caller).
-fn set_current(state: &mut AppState, p: PathBuf, record: bool) {
+fn set_current(state: &mut AppState, pane: usize, p: PathBuf, record: bool) {
     if !p.is_dir() {
         state.error(format!("Folder no longer exists: {}", p.display()));
         return;
     }
-    state.nav.current = Some(p.clone());
-    state.selection.items.clear();
-    state.selection.anchor = None;
-    state.selection.focused = None;
+    let pane_state = state.pane_at_mut(pane);
+    pane_state.nav.current = Some(p.clone());
+    pane_state.selection.items.clear();
+    pane_state.selection.anchor = None;
+    pane_state.selection.focused = None;
     if record {
         state.settings.add_recent(p.clone());
     }
-    state.settings.last_folder = Some(p);
-    refresh_view(state, true);
+    if pane == 0 {
+        state.settings.last_folder = Some(p);
+    } else {
+        state.settings.last_folder_secondary = Some(p);
+    }
+    refresh_view(state, pane, true);
 }
 
 fn open_folder_dialog(state: &mut AppState, ctx: &egui::Context) {
@@ -551,7 +613,7 @@ fn open_folder_dialog(state: &mut AppState, ctx: &egui::Context) {
         return;
     }
     let (tx, rx) = mpsc::channel();
-    let start = state.nav.current.clone();
+    let start = state.pane().nav.current.clone();
     let ctx = ctx.clone();
     let spawned = std::thread::Builder::new()
         .name("folder-dialog".into())
@@ -581,7 +643,7 @@ fn open_paths(state: &mut AppState, ctx: &egui::Context, paths: Vec<PathBuf>) {
             && let Some(parent) = p.parent().map(Path::to_path_buf)
         {
             let media = classify(&p).is_some();
-            state.pending_select = Some(p.clone());
+            state.pane_mut().pending_select = Some(p.clone());
             if media {
                 state.pending_open = Some(p);
             }
@@ -600,7 +662,7 @@ fn open_paths(state: &mut AppState, ctx: &egui::Context, paths: Vec<PathBuf>) {
 // ======================================================================================
 
 fn index_of(state: &AppState, p: &Path) -> Option<usize> {
-    state.entries.iter().position(|e| e.path == p)
+    state.pane().entries.iter().position(|e| e.path == p)
 }
 
 fn select(state: &mut AppState, path: PathBuf, mode: SelectMode) {
@@ -609,34 +671,39 @@ fn select(state: &mut AppState, path: PathBuf, mode: SelectMode) {
     };
     match mode {
         SelectMode::Replace => {
-            state.selection.items = BTreeSet::from([path.clone()]);
-            state.selection.anchor = Some(path.clone());
+            let sel = &mut state.pane_mut().selection;
+            sel.items = BTreeSet::from([path.clone()]);
+            sel.anchor = Some(path.clone());
         }
         SelectMode::Toggle => {
-            if !state.selection.items.remove(&path) {
-                state.selection.items.insert(path.clone());
+            let sel = &mut state.pane_mut().selection;
+            if !sel.items.remove(&path) {
+                sel.items.insert(path.clone());
             }
-            state.selection.anchor = Some(path.clone());
+            sel.anchor = Some(path.clone());
         }
         SelectMode::Range => {
             let ai = state
+                .pane()
                 .selection
                 .anchor
                 .as_deref()
                 .and_then(|a| index_of(state, a))
                 .or_else(|| {
                     state
+                        .pane()
                         .selection
                         .focused
                         .as_deref()
                         .and_then(|a| index_of(state, a))
                 })
                 .unwrap_or(ti);
-            if state.selection.anchor.is_none() {
-                state.selection.anchor = state.entries.get(ai).map(|e| e.path.clone());
+            let p = state.pane_mut();
+            if p.selection.anchor.is_none() {
+                p.selection.anchor = p.entries.get(ai).map(|e| e.path.clone());
             }
             let (lo, hi) = (ai.min(ti), ai.max(ti));
-            state.selection.items = state
+            p.selection.items = p
                 .entries
                 .iter()
                 .skip(lo)
@@ -645,15 +712,16 @@ fn select(state: &mut AppState, path: PathBuf, mode: SelectMode) {
                 .collect();
         }
     }
-    state.selection.focused = Some(path);
+    state.pane_mut().selection.focused = Some(path);
 }
 
 fn move_focus(state: &mut AppState, delta: isize, extend: bool) {
-    let len = state.entries.len();
+    let len = state.pane().entries.len();
     if len == 0 {
         return;
     }
     let cur = state
+        .pane()
         .selection
         .focused
         .as_deref()
@@ -665,7 +733,7 @@ fn move_focus(state: &mut AppState, delta: isize, extend: bool) {
         None if delta >= 0 => 0,
         None => len - 1,
     };
-    let Some(path) = state.entries.get(target).map(|e| e.path.clone()) else {
+    let Some(path) = state.pane().entries.get(target).map(|e| e.path.clone()) else {
         return;
     };
     let mode = if extend {
@@ -673,8 +741,9 @@ fn move_focus(state: &mut AppState, delta: isize, extend: bool) {
     } else {
         SelectMode::Replace
     };
-    if extend && state.selection.anchor.is_none() {
-        state.selection.anchor = state.selection.focused.clone();
+    let sel = &mut state.pane_mut().selection;
+    if extend && sel.anchor.is_none() {
+        sel.anchor = sel.focused.clone();
     }
     select(state, path, mode);
 }
@@ -689,20 +758,21 @@ fn activate(state: &mut AppState, p: PathBuf) {
     };
     select(state, p.clone(), SelectMode::Replace);
     match kind {
-        MediaKind::Audio => {
+        MediaKind::Audio | MediaKind::Other => {
             state.pending.push(Action::OpenWithDefaultApp(p));
         }
         _ => open_fullscreen(state, p),
     }
 }
 
-/// Entries an operation applies to: the selection, else the focused entry.
+/// Entries an operation applies to: the active pane's selection, else its focused entry.
 fn target_entries(state: &AppState) -> Vec<Entry> {
     let sel: Vec<Entry> = state.selected_entries().into_iter().cloned().collect();
     if !sel.is_empty() {
         return sel;
     }
     state
+        .pane()
         .selection
         .focused
         .as_deref()
@@ -755,7 +825,7 @@ fn paste(state: &mut AppState, dest: Option<PathBuf>) {
         state.info("Clipboard is empty");
         return;
     };
-    let Some(dest) = dest.or_else(|| state.nav.current.clone()) else {
+    let Some(dest) = dest.or_else(|| state.pane().nav.current.clone()) else {
         state.error("Open a folder to paste into");
         return;
     };
@@ -767,6 +837,74 @@ fn paste(state: &mut AppState, dest: Option<PathBuf>) {
 
 fn drop_paths(state: &mut AppState, paths: Vec<PathBuf>, dest: PathBuf, copy: bool) {
     transfer(state, paths, dest, copy);
+}
+
+/// Destination folder for a copy/move to the other pane: its current folder, only in dual mode and
+/// only when it differs from the source pane's folder.
+pub fn other_pane_target(
+    dual: bool,
+    source: Option<&Path>,
+    other: Option<&Path>,
+) -> Result<PathBuf, &'static str> {
+    if !dual {
+        return Err("Turn on the second pane first (F3)");
+    }
+    let Some(other) = other else {
+        return Err("The other pane has no folder open");
+    };
+    if source == Some(other) {
+        return Err("Both panes show the same folder");
+    }
+    Ok(other.to_path_buf())
+}
+
+fn transfer_to_other_pane(state: &mut AppState, copy: bool) {
+    let target = other_pane_target(
+        state.settings.dual_pane,
+        state.pane().nav.current.as_deref(),
+        state.pane_at(state.other_index()).nav.current.as_deref(),
+    );
+    let dest = match target {
+        Ok(d) => d,
+        Err(msg) => {
+            state.info(msg);
+            return;
+        }
+    };
+    let paths = target_members(state);
+    if paths.is_empty() {
+        state.info("Nothing selected");
+        return;
+    }
+    transfer(state, paths, dest, copy);
+}
+
+fn toggle_dual_pane(state: &mut AppState) {
+    let on = !state.settings.dual_pane;
+    state.settings.dual_pane = on;
+    if on {
+        let start = state
+            .settings
+            .last_folder_secondary
+            .clone()
+            .filter(|p| p.is_dir())
+            .or_else(|| state.panes[0].nav.current.clone());
+        if state.panes[1].nav.current.is_none()
+            && let Some(p) = start
+        {
+            set_current(state, 1, p, false);
+        } else {
+            refresh_view(state, 1, true);
+        }
+    } else {
+        state.panes[1].scan_note = None;
+        state.active = 0;
+        // pane 1's last folder is remembered for the next time the pane is opened
+        state.settings.last_folder_secondary = state.panes[1].nav.current.clone();
+        // panes share the thumbnail queue; make pane 0 re-request its cards
+        state.panes[0].view.reset_requests();
+    }
+    save_settings(state);
 }
 
 /// Queue a copy/move of `sources` into `dest`, skipping no-ops (move into own folder, folder into itself).
@@ -868,7 +1006,7 @@ fn new_folder(state: &mut AppState, name: &str) {
             return;
         }
     };
-    let Some(parent) = state.nav.current.clone() else {
+    let Some(parent) = state.pane().nav.current.clone() else {
         state.error("Open a folder first");
         return;
     };
@@ -902,8 +1040,10 @@ fn annotate(
         Err(e) => state.error(format!("{what} update failed: {e}")),
     }
     bump_library(state);
-    if !state.filters.query.is_empty() {
-        refresh_view(state, true);
+    for i in 0..state.visible_panes() {
+        if !state.pane_at(i).filters.query.is_empty() {
+            refresh_view(state, i, true);
+        }
     }
 }
 
@@ -951,9 +1091,9 @@ fn apply_settings(state: &mut AppState, ctx: &egui::Context, d: Settings) {
     if prev_hidden != state.settings.show_hidden
         || prev_collapse != state.settings.collapse_sequences
     {
-        refresh_view(state, true);
+        refresh_all(state, true);
     } else {
-        refresh_view(state, false);
+        refresh_all(state, false);
     }
     // re-point the preview so a changed autoplay / fps setting takes effect
     let entry = state
@@ -975,11 +1115,14 @@ pub fn save_settings(state: &mut AppState) {
 
 fn open_fullscreen(state: &mut AppState, p: PathBuf) {
     match state.entry(&p).map(|e| e.kind) {
-        Some(MediaKind::Audio) => state.pending.push(Action::OpenWithDefaultApp(p)),
+        Some(MediaKind::Audio | MediaKind::Other) => {
+            state.pending.push(Action::OpenWithDefaultApp(p));
+        }
         Some(_) => {
-            state.selection.items = BTreeSet::from([p.clone()]);
-            state.selection.anchor = Some(p.clone());
-            state.selection.focused = Some(p.clone());
+            let sel = &mut state.pane_mut().selection;
+            sel.items = BTreeSet::from([p.clone()]);
+            sel.anchor = Some(p.clone());
+            sel.focused = Some(p.clone());
             state.fullscreen = Some(FullscreenState::new(p));
         }
         None => state.error(format!(
@@ -994,9 +1137,10 @@ fn fullscreen_step(state: &mut AppState, delta: isize) {
         return;
     };
     let viewable: Vec<&Entry> = state
+        .pane()
         .entries
         .iter()
-        .filter(|e| e.kind != MediaKind::Audio)
+        .filter(|e| !matches!(e.kind, MediaKind::Audio | MediaKind::Other))
         .collect();
     if viewable.is_empty() {
         return;
@@ -1015,9 +1159,10 @@ fn fullscreen_step(state: &mut AppState, delta: isize) {
     if path == cur {
         return;
     }
-    state.selection.items = BTreeSet::from([path.clone()]);
-    state.selection.anchor = Some(path.clone());
-    state.selection.focused = Some(path.clone());
+    let sel = &mut state.pane_mut().selection;
+    sel.items = BTreeSet::from([path.clone()]);
+    sel.anchor = Some(path.clone());
+    sel.focused = Some(path.clone());
     if let Some(f) = state.fullscreen.as_mut() {
         f.path = path;
     }
@@ -1059,7 +1204,7 @@ pub fn poll_workers(state: &mut AppState, ctx: &egui::Context) {
     }
 
     if let Some(m) = state.metadata.poll()
-        && state.selection.focused.as_deref() == Some(m.path.as_path())
+        && state.pane().selection.focused.as_deref() == Some(m.path.as_path())
     {
         state.current_metadata = Some(m);
         ctx.request_repaint();
@@ -1118,38 +1263,77 @@ fn apply_outcome(state: &mut AppState, o: OpOutcome) {
         state.info(o.label.clone());
     }
 
-    // the current folder may have been moved/renamed/removed
-    if let Some(cur) = state.nav.current.clone()
-        && !cur.is_dir()
-    {
-        let remapped = o
-            .moved
-            .iter()
-            .find_map(|(old, new)| cur.strip_prefix(old).ok().map(|rest| new.join(rest)))
-            .filter(|p| p.is_dir());
-        let target = remapped.or_else(|| {
-            cur.ancestors()
-                .skip(1)
-                .find(|a| a.is_dir())
-                .map(Path::to_path_buf)
-        });
-        state.nav.back.retain(|p| p.is_dir());
-        state.nav.forward.retain(|p| p.is_dir());
-        match target {
-            Some(t) => set_current(state, t, false),
-            None => state.nav.current = None,
-        }
+    // a pane's folder may have been moved/renamed/removed
+    for i in 0..state.panes.len() {
+        recover_missing_folder(state, i, &o);
     }
 
-    let cur = state.nav.current.as_deref();
-    let in_cur = |p: &PathBuf| p.parent() == cur;
-    state.pending_select = match (o.created.as_slice(), o.moved.as_slice()) {
-        ([c], _) if in_cur(c) => Some(c.clone()),
-        ([], [(_, n)]) if in_cur(n) => Some(n.clone()),
-        _ => None,
-    };
+    let folders = affected_folders(&o);
+    for i in 0..state.visible_panes() {
+        let p = state.pane_at_mut(i);
+        let cur = p.nav.current.as_deref();
+        let in_cur = |q: &PathBuf| q.parent() == cur;
+        p.pending_select = match (o.created.as_slice(), o.moved.as_slice()) {
+            ([c], _) if in_cur(c) => Some(c.clone()),
+            ([], [(_, n)]) if in_cur(n) => Some(n.clone()),
+            _ => None,
+        };
+    }
     state.tree_generation = state.tree_generation.wrapping_add(1);
-    refresh_view(state, true);
+    for i in 0..state.visible_panes() {
+        let p = state.pane_at(i);
+        let library = p.filters.scope == FilterScope::Library;
+        if pane_affected(p.nav.current.as_deref(), library, &folders) {
+            refresh_view(state, i, true);
+        } else {
+            state.pane_at_mut(i).pending_select = None;
+        }
+    }
+}
+
+/// Folders whose listing a finished operation may have changed: the parent of every path it moved
+/// (old and new), created or removed.
+pub fn affected_folders(o: &OpOutcome) -> BTreeSet<PathBuf> {
+    let moved = o.moved.iter().flat_map(|(a, b)| [a, b]);
+    moved
+        .chain(o.created.iter())
+        .chain(o.removed.iter())
+        .filter_map(|p| p.parent().map(Path::to_path_buf))
+        .collect()
+}
+
+/// Whether a pane showing `current` must be rescanned after an operation touching `folders`.
+/// Library-scope panes always are (any member may have moved); so is a pane whose folder vanished.
+pub fn pane_affected(current: Option<&Path>, library: bool, folders: &BTreeSet<PathBuf>) -> bool {
+    library || current.is_some_and(|c| folders.contains(c) || !c.is_dir())
+}
+
+/// If pane `i`'s folder no longer exists, follow a move or fall back to the nearest existing ancestor.
+fn recover_missing_folder(state: &mut AppState, i: usize, o: &OpOutcome) {
+    let Some(cur) = state.pane_at(i).nav.current.clone() else {
+        return;
+    };
+    if cur.is_dir() {
+        return;
+    }
+    let remapped = o
+        .moved
+        .iter()
+        .find_map(|(old, new)| cur.strip_prefix(old).ok().map(|rest| new.join(rest)))
+        .filter(|p| p.is_dir());
+    let target = remapped.or_else(|| {
+        cur.ancestors()
+            .skip(1)
+            .find(|a| a.is_dir())
+            .map(Path::to_path_buf)
+    });
+    let nav = &mut state.pane_at_mut(i).nav;
+    nav.back.retain(|p| p.is_dir());
+    nav.forward.retain(|p| p.is_dir());
+    match target {
+        Some(t) => set_current(state, i, t, false),
+        None => state.pane_at_mut(i).nav.current = None,
+    }
 }
 
 /// Library identities of sequences are pattern paths (`shot_####.exr`); derive them from frame moves so
@@ -1221,5 +1405,57 @@ mod tests {
                 PathBuf::from("/d/b_####.exr")
             )]
         );
+    }
+}
+
+#[cfg(test)]
+mod pane_tests {
+    use super::*;
+
+    #[test]
+    fn other_pane_target_resolution() {
+        let a = Path::new("/a");
+        let b = Path::new("/b");
+        assert_eq!(
+            other_pane_target(true, Some(a), Some(b)),
+            Ok(PathBuf::from("/b"))
+        );
+        assert!(other_pane_target(false, Some(a), Some(b)).is_err());
+        assert!(other_pane_target(true, Some(a), None).is_err());
+        assert!(other_pane_target(true, Some(a), Some(a)).is_err());
+        assert_eq!(
+            other_pane_target(true, None, Some(b)),
+            Ok(PathBuf::from("/b"))
+        );
+    }
+
+    #[test]
+    fn outcome_affects_source_and_destination_folders() {
+        let o = OpOutcome {
+            moved: vec![(PathBuf::from("/src/a.png"), PathBuf::from("/dst/a.png"))],
+            created: vec![PathBuf::from("/dst/b.png")],
+            removed: vec![PathBuf::from("/gone/c.png")],
+            ..OpOutcome::default()
+        };
+        let f = affected_folders(&o);
+        assert_eq!(
+            f,
+            BTreeSet::from([
+                PathBuf::from("/src"),
+                PathBuf::from("/dst"),
+                PathBuf::from("/gone")
+            ])
+        );
+        assert!(pane_affected(Some(Path::new("/dst")), false, &f));
+        assert!(pane_affected(Some(Path::new("/src")), false, &f));
+        // missing folder or library scope always refresh; unrelated existing folder does not
+        assert!(pane_affected(
+            Some(Path::new("/definitely/missing")),
+            false,
+            &f
+        ));
+        assert!(pane_affected(None, true, &f));
+        assert!(!pane_affected(Some(Path::new("/")), false, &f));
+        assert!(!pane_affected(None, false, &f));
     }
 }

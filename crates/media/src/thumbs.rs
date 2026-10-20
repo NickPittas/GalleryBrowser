@@ -169,6 +169,9 @@ impl Thumbnailer {
 
     /// Memory-cache hit, synchronous and cheap.
     pub fn cached(&self, entry: &Entry, max_edge: u32) -> Option<Arc<RgbaImage>> {
+        if entry.kind == gallerybrowser_core::MediaKind::Other {
+            return None;
+        }
         let key = cache_key(entry, max_edge).0;
         self.memo
             .lock()
@@ -179,6 +182,15 @@ impl Thumbnailer {
 
     /// Queue generation (deduplicated). Higher priority first (visible items).
     pub fn request(&self, entry: &Entry, max_edge: u32, priority: i32) {
+        if entry.kind == gallerybrowser_core::MediaKind::Other {
+            self.lock().ready.push(ThumbResult {
+                path: entry.path.clone(),
+                max_edge,
+                scrub: None,
+                image: Err("no thumbnail".to_string()),
+            });
+            return;
+        }
         let hash = cache_key(entry, max_edge);
         let slot = hash.0;
         let hit = self

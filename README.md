@@ -13,6 +13,7 @@ A fast, video-first media browser for Linux, written in Rust (egui + wgpu) on th
 - **Info pane**: file properties, EXIF, ComfyUI workflow/prompt metadata from PNGs.
 - **Tags, collections and 0-5 ratings**, persisted crash-safely.
 - **File operations** on a background worker: copy, move, trash, permanent delete, rename, batch rename; never overwrites; undo/redo.
+- **Show all files** toggle (list non-media files too) and an optional **second file pane** (F3) for copying/moving between two folders.
 - **Single instance**: `gallerybrowser PATH` forwards the path to the running window.
 
 Keyboard shortcuts: [docs/user_guide/KEYBOARD_SHORTCUTS.md](docs/user_guide/KEYBOARD_SHORTCUTS.md).

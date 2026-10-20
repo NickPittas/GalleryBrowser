@@ -27,11 +27,16 @@ pub fn handle(ctx: &egui::Context, state: &mut AppState) {
     let mut out: Vec<Action> = Vec::new();
     let mut step = 0i32;
     let mut open_viewer = false;
+    let dual = state.settings.dual_pane;
+    let other = state.other_index();
     ctx.input_mut(|i| {
         // egui turns Ctrl+C/X/V into clipboard events rather than key presses.
+        let shift = i.modifiers.shift;
         let mut keep = Vec::with_capacity(i.events.len());
         for ev in std::mem::take(&mut i.events) {
             match ev {
+                // Ctrl+Shift+C is "copy to other pane", not a clipboard copy.
+                Event::Copy if shift => {}
                 Event::Copy => out.push(Action::Copy),
                 Event::Cut => out.push(Action::Cut),
                 Event::Paste(_) => out.push(Action::Paste { dest: None }),
@@ -100,6 +105,18 @@ pub fn handle(ctx: &egui::Context, state: &mut AppState) {
         if i.consume_key(Modifiers::NONE, Key::Space) {
             open_viewer = true;
         }
+        if i.consume_key(Modifiers::NONE, Key::F3) {
+            out.push(Action::ToggleDualPane);
+        }
+        if dual && i.consume_key(Modifiers::NONE, Key::Tab) {
+            out.push(Action::FocusPane(other));
+        }
+        if i.consume_key(ctrl_shift, Key::C) {
+            out.push(Action::CopyToOtherPane);
+        }
+        if i.consume_key(ctrl_shift, Key::M) {
+            out.push(Action::MoveToOtherPane);
+        }
     });
     if step != 0 {
         state.preview.step_frame(step);
@@ -112,12 +129,17 @@ pub fn handle(ctx: &egui::Context, state: &mut AppState) {
 
 /// The entry Space opens: the focused entry, else the only selected one. `None` unless it is a visible entry.
 fn viewer_target(state: &AppState) -> Option<std::path::PathBuf> {
-    let path = match &state.selection.focused {
+    let path = match &state.pane().selection.focused {
         Some(p) => p,
-        None if state.selection.items.len() == 1 => state.selection.items.iter().next()?,
+        None if state.pane().selection.items.len() == 1 => {
+            state.pane().selection.items.iter().next()?
+        }
         None => return None,
     };
-    state.entry(path).map(|e| e.path.clone())
+    state
+        .entry(path)
+        .filter(|e| e.kind != gallerybrowser_core::MediaKind::Other)
+        .map(|e| e.path.clone())
 }
 
 /// (keys, description) rows for the shortcuts dialog.
@@ -147,6 +169,12 @@ pub fn table() -> Vec<(&'static str, &'static str)> {
         ("Space (viewer)", "Play / pause"),
         ("Esc (viewer)", "Close the viewer"),
         ("Ctrl+P", "Show / hide the preview pane"),
+        ("F3", "Show / hide the second file pane"),
+        ("Tab", "Switch the active pane (second pane on)"),
+        (
+            "Ctrl+Shift+C / Ctrl+Shift+M",
+            "Copy / move selection to the other pane",
+        ),
         ("F1", "Keyboard shortcuts"),
         ("Ctrl+Q", "Quit"),
     ]

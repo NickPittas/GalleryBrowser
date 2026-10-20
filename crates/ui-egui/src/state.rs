@@ -7,6 +7,7 @@ use gallerybrowser_library::{Library, LibraryQuery};
 use gallerybrowser_media::{MediaMetadata, MetadataWorker, Thumbnailer};
 
 use crate::batch_rename::BatchRenameDialog;
+use crate::file_pane::FilePaneState;
 use crate::fullscreen::FullscreenState;
 use crate::preview::PreviewState;
 use crate::settings_dialog::SettingsDialog;
@@ -163,10 +164,16 @@ pub enum Action {
     SetViewMode(ViewMode),
     SetThumbnailSize(u32),
     SetCollapseSequences(bool),
-    TogglePreviewPane,
     AddFavorite(PathBuf),
     RemoveFavorite(PathBuf),
-    // windows
+    TogglePreviewPane,
+    /// Make pane `i` the active one (no-op when dual pane is off).
+    FocusPane(usize),
+    ToggleDualPane,
+    SetShowAllFiles(bool),
+    /// Copy / move the active pane's selection into the other pane's folder.
+    CopyToOtherPane,
+    MoveToOtherPane,
     OpenSettings,
     ApplySettings(Settings),
     OpenFullscreen(PathBuf),
@@ -180,15 +187,9 @@ pub enum Action {
     OpenPaths(Vec<PathBuf>),
 }
 
-pub struct AppState {
-    pub dirs: AppDirs,
-    pub settings: Settings,
-    pub library: Library,
-    pub fileops: FileOpsWorker,
-    pub thumbs: Thumbnailer,
-    pub metadata: MetadataWorker,
-    /// Latest metadata for `selection.focused`.
-    pub current_metadata: Option<MediaMetadata>,
+/// Everything one file pane owns: its folder history, scan, view filters, selection and view state.
+#[derive(Default)]
+pub struct PaneState {
     pub nav: Navigation,
     /// Unfiltered scan of `nav.current` (cached between filter changes).
     pub scanned: Vec<Entry>,
@@ -196,6 +197,27 @@ pub struct AppState {
     pub entries: Vec<Entry>,
     pub selection: Selection,
     pub filters: Filters,
+    /// Entries of the Library scope could not be fully loaded etc. — human readable scan note.
+    pub scan_note: Option<String>,
+    /// Select this entry after the next refresh (new/renamed/opened item).
+    pub pending_select: Option<PathBuf>,
+    /// Widget-level view state (scroll, thumbnail request bookkeeping).
+    pub view: FilePaneState,
+}
+
+pub struct AppState {
+    pub dirs: AppDirs,
+    pub settings: Settings,
+    pub library: Library,
+    pub fileops: FileOpsWorker,
+    pub thumbs: Thumbnailer,
+    pub metadata: MetadataWorker,
+    /// Latest metadata for the active pane's `selection.focused`.
+    pub current_metadata: Option<MediaMetadata>,
+    /// Pane 0 (left) and pane 1 (right, shown when `settings.dual_pane`).
+    pub panes: [PaneState; 2],
+    /// Index of the active pane (0 unless dual pane is on).
+    pub active: usize,
     pub clipboard: Option<Clipboard>,
     pub status: Option<Status>,
     pub dialogs: Dialogs,
@@ -210,8 +232,6 @@ pub struct AppState {
     pub folder_dialog: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     /// (done, total) of the running file operation.
     pub progress: Option<(u64, u64)>,
-    /// Select this entry after the next refresh (new/renamed/opened item).
-    pub pending_select: Option<PathBuf>,
     /// Open this entry fullscreen after the next refresh (file given on the command line).
     pub pending_open: Option<PathBuf>,
     /// Bumped whenever the folder tree caches must be dropped (file ops, refresh, settings).
@@ -223,22 +243,53 @@ pub struct AppState {
     /// Focus last pushed to the preview pane / metadata worker.
     pub synced_preview: Option<PathBuf>,
     pub synced_meta: Option<PathBuf>,
-    /// Entries of the Library scope could not be fully loaded etc. — human readable scan note.
-    pub scan_note: Option<String>,
 }
 
 impl AppState {
     pub fn push(&mut self, a: Action) {
         self.pending.push(a);
     }
-    pub fn entry(&self, path: &std::path::Path) -> Option<&Entry> {
-        self.entries.iter().find(|e| e.path == path)
+    /// Active pane (always valid: `active` is clamped by [`AppState::set_active`]).
+    pub fn pane(&self) -> &PaneState {
+        self.pane_at(self.active)
     }
-    /// Selected entries in visible order.
+    pub fn pane_mut(&mut self) -> &mut PaneState {
+        let i = self.active;
+        self.pane_at_mut(i)
+    }
+    pub fn pane_at(&self, i: usize) -> &PaneState {
+        self.panes.get(i).unwrap_or(&self.panes[0])
+    }
+    pub fn pane_at_mut(&mut self, i: usize) -> &mut PaneState {
+        let i = if i < self.panes.len() { i } else { 0 };
+        &mut self.panes[i]
+    }
+    /// Index of the inactive pane.
+    pub fn other_index(&self) -> usize {
+        other_pane(self.active)
+    }
+    /// Number of panes currently shown.
+    pub fn visible_panes(&self) -> usize {
+        if self.settings.dual_pane { 2 } else { 1 }
+    }
+    /// Make pane `i` active; forced to 0 when only one pane is shown.
+    pub fn set_active(&mut self, i: usize) {
+        self.active = if self.settings.dual_pane && i < self.panes.len() {
+            i
+        } else {
+            0
+        };
+    }
+    /// Active pane's entry for `path`.
+    pub fn entry(&self, path: &std::path::Path) -> Option<&Entry> {
+        self.pane().entries.iter().find(|e| e.path == path)
+    }
+    /// Selected entries of the active pane in visible order.
     pub fn selected_entries(&self) -> Vec<&Entry> {
-        self.entries
+        let p = self.pane();
+        p.entries
             .iter()
-            .filter(|e| self.selection.items.contains(&e.path))
+            .filter(|e| p.selection.items.contains(&e.path))
             .collect()
     }
     /// Member paths of all selected entries (sequences expanded).
@@ -262,6 +313,11 @@ impl AppState {
             text,
         });
     }
+}
+
+/// Index of the pane that is not `i` (two panes).
+pub fn other_pane(i: usize) -> usize {
+    if i == 0 { 1 } else { 0 }
 }
 
 /// egui drag-and-drop payload for internal drags (file pane → folder tree): member paths.

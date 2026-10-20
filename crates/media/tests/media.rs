@@ -640,3 +640,29 @@ fn multipart_exr_sequences_decode_through_the_photocraft_fallback() {
             .is_ok()
     );
 }
+
+#[test]
+#[allow(clippy::expect_used)]
+fn other_files_probe_facts_and_have_no_thumbnail() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let p = dir.path().join("scene.blend");
+    std::fs::write(&p, vec![0u8; 123]).expect("write");
+    let e = entry_for(&p, MediaKind::Other);
+
+    let m = probe(&e).expect("probe");
+    assert_eq!(m.file_size, Some(123));
+    assert_eq!(m.format.as_deref(), Some("BLEND"));
+    assert!(m.error.is_none() && m.modified.is_some());
+
+    let t = Thumbnailer::new(thumb_cfg(&dir.path().join("cache")));
+    t.begin_batch();
+    assert!(t.cached(&e, 64).is_none());
+    t.request(&e, 64, 0);
+    let results = t.poll();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].image.is_err());
+    assert_eq!(results[0].path, p);
+    t.request_scrub(&e, 64, 0, 8);
+    std::thread::sleep(Duration::from_millis(30));
+    assert!(t.poll().is_empty());
+}

@@ -36,7 +36,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     {
         let state_ref = &*state;
         ui.add_space(ui.spacing().item_spacing.y);
-        if let Some(focused) = state_ref.selection.focused.as_ref() {
+        if let Some(focused) = state_ref.pane().selection.focused.as_ref() {
             let entry = state_ref.entry(focused);
             let name = entry.map(|e| e.name.clone()).unwrap_or_else(|| {
                 focused
@@ -45,7 +45,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     .unwrap_or_else(|| focused.display().to_string())
             });
             ui.add(egui::Label::new(egui::RichText::new(name).strong().size(15.0)).wrap());
-            if let Some(entry) = entry {
+            if let Some(entry) = entry.filter(|e| e.kind != gallerybrowser_core::MediaKind::Other) {
                 annotations_block(ui, state_ref, entry, &mut actions);
             }
             ui.add_space(4.0);
@@ -464,6 +464,7 @@ fn kind_label(k: MediaKind) -> String {
         MediaKind::Video => "Video",
         MediaKind::Sequence => "Image sequence",
         MediaKind::Audio => "Audio",
+        MediaKind::Other => "File",
     }
     .to_string()
 }

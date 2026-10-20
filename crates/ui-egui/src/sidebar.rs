@@ -45,12 +45,12 @@ fn cached_lists(ui: &egui::Ui, state: &AppState) -> Lists {
 
 fn scope_section(ui: &mut egui::Ui, state: &mut AppState) {
     ui.label(egui::RichText::new("Scope").strong());
-    let mut scope = state.filters.scope;
+    let mut scope = state.pane().filters.scope;
     ui.horizontal(|ui| {
         ui.selectable_value(&mut scope, FilterScope::Folder, "Folder");
         ui.selectable_value(&mut scope, FilterScope::Library, "Library");
     });
-    if scope != state.filters.scope {
+    if scope != state.pane().filters.scope {
         state.push(Action::SetScope(scope));
     }
 }
@@ -70,7 +70,7 @@ fn stars(n: u8) -> String {
 
 fn rating_section(ui: &mut egui::Ui, state: &mut AppState) {
     ui.label(egui::RichText::new("Rating").strong());
-    let current = state.filters.query.rating;
+    let current = state.pane().filters.query.rating;
     let mut chosen = current;
     egui::ComboBox::from_id_salt("rating_filter")
         .width(ui.available_width() - 8.0)
@@ -94,7 +94,7 @@ fn rating_section(ui: &mut egui::Ui, state: &mut AppState) {
             }
         });
     if chosen != current {
-        let mut q = state.filters.query.clone();
+        let mut q = state.pane().filters.query.clone();
         q.rating = chosen;
         state.push(Action::SetQuery(q));
     }
@@ -109,13 +109,13 @@ fn tags_section(ui: &mut egui::Ui, state: &mut AppState, tags: &[NamedCount]) {
             }
             if ui
                 .add_enabled(
-                    !state.filters.query.tags.is_empty(),
+                    !state.pane().filters.query.tags.is_empty(),
                     egui::Button::new("All").small(),
                 )
                 .on_hover_text("Clear tag filter")
                 .clicked()
             {
-                let mut q = state.filters.query.clone();
+                let mut q = state.pane().filters.query.clone();
                 q.tags.clear();
                 state.push(Action::SetQuery(q));
             }
@@ -125,10 +125,10 @@ fn tags_section(ui: &mut egui::Ui, state: &mut AppState, tags: &[NamedCount]) {
         ui.label(egui::RichText::new("No tags yet").color(theme::TEXT_MUTED));
     }
     for t in tags {
-        let active = state.filters.query.tags.contains(&t.name);
+        let active = state.pane().filters.query.tags.contains(&t.name);
         let resp = ui.selectable_label(active, format!("{} ({})", t.name, t.count));
         if resp.clicked() {
-            let mut q = state.filters.query.clone();
+            let mut q = state.pane().filters.query.clone();
             if active {
                 q.tags.retain(|x| *x != t.name);
             } else {
@@ -158,13 +158,13 @@ fn collections_section(ui: &mut egui::Ui, state: &mut AppState, collections: &[N
             }
             if ui
                 .add_enabled(
-                    state.filters.query.collection.is_some(),
+                    state.pane().filters.query.collection.is_some(),
                     egui::Button::new("All").small(),
                 )
                 .on_hover_text("Clear collection filter")
                 .clicked()
             {
-                let mut q = state.filters.query.clone();
+                let mut q = state.pane().filters.query.clone();
                 q.collection = None;
                 state.push(Action::SetQuery(q));
             }
@@ -174,10 +174,10 @@ fn collections_section(ui: &mut egui::Ui, state: &mut AppState, collections: &[N
         ui.label(egui::RichText::new("No collections yet").color(theme::TEXT_MUTED));
     }
     for c in collections {
-        let active = state.filters.query.collection.as_deref() == Some(c.name.as_str());
+        let active = state.pane().filters.query.collection.as_deref() == Some(c.name.as_str());
         let resp = ui.selectable_label(active, format!("{} ({})", c.name, c.count));
         if resp.clicked() {
-            let mut q = state.filters.query.clone();
+            let mut q = state.pane().filters.query.clone();
             q.collection = if active { None } else { Some(c.name.clone()) };
             state.push(Action::SetQuery(q));
         }

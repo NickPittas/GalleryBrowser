@@ -38,6 +38,8 @@ enum Section {
 struct Frame<'a> {
     tree: &'a mut TreeState,
     current: Option<PathBuf>,
+    /// Folder of the inactive pane (dual-pane mode): drawn with a weaker highlight.
+    other: Option<PathBuf>,
     show_hidden: bool,
     favorites: Vec<PathBuf>,
     external_drop: Vec<PathBuf>,
@@ -52,9 +54,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, tree: &mut TreeState) {
         tree.exists.clear();
         tree.mounts = mount_roots();
     }
-    if tree.last_nav != state.nav.current {
-        tree.last_nav = state.nav.current.clone();
-        if let Some(cur) = &state.nav.current {
+    if tree.last_nav != state.pane().nav.current {
+        tree.last_nav = state.pane().nav.current.clone();
+        if let Some(cur) = &state.pane().nav.current {
             for a in cur.ancestors().skip(1) {
                 tree.expanded.insert(a.to_path_buf());
             }
@@ -72,7 +74,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, tree: &mut TreeState) {
             .collect()
     });
     let mut f = Frame {
-        current: state.nav.current.clone(),
+        current: state.pane().nav.current.clone(),
+        other: if state.settings.dual_pane {
+            state.pane_at(state.other_index()).nav.current.clone()
+        } else {
+            None
+        },
         show_hidden: state.settings.show_hidden,
         favorites: favorites.clone(),
         external_drop,
@@ -206,6 +213,7 @@ fn node(
             .unwrap_or_else(|| path.display().to_string())
     });
     let selected = f.current.as_deref() == Some(path);
+    let other_pane = !selected && f.other.as_deref() == Some(path);
     let indent = depth as f32 * INDENT;
 
     let (rect, resp) = ui.allocate_exact_size(
@@ -220,6 +228,8 @@ fn node(
         let p = ui.painter();
         if selected {
             p.rect_filled(rect, 3.0, theme::ACCENT_SURFACE);
+        } else if other_pane {
+            p.rect_filled(rect, 3.0, theme::ACCENT_SURFACE.gamma_multiply(0.45));
         } else if resp.hovered() {
             p.rect_filled(rect, 3.0, ui.visuals().widgets.hovered.bg_fill);
         }

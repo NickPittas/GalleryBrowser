@@ -9,7 +9,7 @@ use egui::{
     Align, Align2, Color32, FontId, Id, Key, Modifiers, Painter, Pos2, Rect, RichText, Sense,
     Shape, Stroke, StrokeKind, TextureHandle, pos2, vec2,
 };
-use gallerybrowser_core::{Entry, MediaKind, SortKey, ViewMode};
+use gallerybrowser_core::{Entry, FilterScope, MediaKind, SortKey, ViewMode};
 use gallerybrowser_media::Thumbnailer;
 
 pub use crate::state::DragPaths;
@@ -55,7 +55,9 @@ const SCRUB_WAIT_SECS: f64 = 5.0;
 /// Inline rename is delegated to the shell dialog: the context menu pushes `Action::BeginRename`.
 #[derive(Default)]
 pub struct FilePaneState {
-    /// Search box buffer; follows `state.filters.search` when that changes elsewhere.
+    /// Which pane this view state belongs to (salts widget ids).
+    index: usize,
+    /// Search box buffer; follows `filters.search` when that changes elsewhere.
     search: String,
     search_seen: String,
     /// Layout of the last grid frame (keyboard navigation and scroll-into-view use it).
@@ -80,32 +82,67 @@ pub struct FilePaneState {
     scrub_wait_until: f64,
 }
 
-pub fn show(ui: &mut egui::Ui, state: &mut AppState, pane: &mut FilePaneState) {
+impl FilePaneState {
+    /// Forget which thumbnails were requested: the thumbnailer drops queued work on `begin_batch`
+    /// (any pane's refresh), so visible cards must be requested again.
+    pub fn reset_requests(&mut self) {
+        self.requested.clear();
+        self.epoch = 0;
+    }
+}
+
+/// Render pane `index`: breadcrumb row, toolbar, grid/list. The pane is made the active one for the
+/// duration of the call, so everything below reads it through `state.pane()`. Any interaction inside
+/// a pane other than the active one queues `Action::FocusPane` ahead of its actions.
+pub fn show(ui: &mut egui::Ui, state: &mut AppState, index: usize) {
+    let index = if index < state.panes.len() { index } else { 0 };
+    let real_active = state.active;
+    state.active = index;
+    let mut view = std::mem::take(&mut state.pane_mut().view);
+    view.index = index;
+    show_pane(ui, state, &mut view, real_active == index);
+    state.pane_mut().view = view;
+    state.active = real_active;
+}
+
+fn show_pane(ui: &mut egui::Ui, state: &mut AppState, pane: &mut FilePaneState, is_active: bool) {
+    let dual = state.settings.dual_pane;
+    let outer = ui.available_rect_before_wrap();
+    let pending_before = state.pending.len();
     let mut acts: Vec<Action> = Vec::new();
-    if state.filters.search != pane.search_seen {
-        pane.search = state.filters.search.clone();
-        pane.search_seen = state.filters.search.clone();
+    crate::breadcrumb::show(ui, state);
+    ui.separator();
+    if state.pane().filters.search != pane.search_seen {
+        pane.search = state.pane().filters.search.clone();
+        pane.search_seen = state.pane().filters.search.clone();
     }
     toolbar(ui, state, pane, &mut acts);
     ui.separator();
 
     let pane_rect = ui.available_rect_before_wrap();
-    if state.selection.focused != pane.last_focused {
-        pane.last_focused = state.selection.focused.clone();
-        pane.scroll_request = state.selection.focused.clone();
+    if state.pane().selection.focused != pane.last_focused {
+        pane.last_focused = state.pane().selection.focused.clone();
+        pane.scroll_request = state.pane().selection.focused.clone();
     }
 
     // Registered first so cards/rows (added later) win hit-testing; only empty space reaches it.
-    let background = ui.interact(pane_rect, Id::new("gb_filepane_background"), Sense::click());
-    if state.entries.is_empty() {
-        let text = if state.filters.search.is_empty()
-            && state.filters.kinds.is_empty()
-            && state.filters.query.is_empty()
-        {
-            "This folder has no media"
-        } else {
-            "No items match the current filters"
-        };
+    let background = ui.interact(
+        pane_rect,
+        Id::new(("gb_filepane_background", pane.index)),
+        Sense::click(),
+    );
+    if state.pane().entries.is_empty() {
+        let filters = &state.pane().filters;
+        let text =
+            if filters.search.is_empty() && filters.kinds.is_empty() && filters.query.is_empty() {
+                if state.settings.show_all_files {
+                    "This folder is empty"
+                } else {
+                    "This folder has no media"
+                }
+            } else {
+                "No items match the current filters"
+            };
         ui.painter().text(
             pane_rect.center(),
             Align2::CENTER_CENTER,
@@ -124,10 +161,32 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, pane: &mut FilePaneState) {
     }
     background.context_menu(|ui| context_menu_ui(ui, state, None, &mut acts));
 
-    handle_keys(ui.ctx(), state, pane, &mut acts);
-    drag_overlay(ui.ctx());
+    if is_active {
+        handle_keys(ui.ctx(), state, pane, &mut acts);
+    }
+    if pane.index == 0 {
+        drag_overlay(ui.ctx());
+    }
     external_drops(ui.ctx(), state, pane_rect, &mut acts);
+    pane_drop(ui.ctx(), state, outer, &mut acts);
+
+    let pressed_inside = ui.input(|i| {
+        i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| outer.contains(p))
+    });
+    let acted = !acts.is_empty() || state.pending.len() > pending_before;
     state.pending.extend(acts);
+    if dual && !is_active && (pressed_inside || acted) {
+        let at = pending_before.min(state.pending.len());
+        state.pending.insert(at, Action::FocusPane(pane.index));
+    }
+    if dual && is_active {
+        ui.painter().rect_stroke(
+            outer.shrink(1.0),
+            2.0,
+            Stroke::new(2.0, theme::ACCENT),
+            StrokeKind::Inside,
+        );
+    }
 }
 
 // ───────────────────────────── toolbar ─────────────────────────────
@@ -180,7 +239,12 @@ fn toolbar_filters(
     }
 
     theme::group_separator(ui);
-    kind_menu(ui, &state.filters.kinds, acts);
+    kind_menu(
+        ui,
+        &state.pane().filters.kinds,
+        state.settings.show_all_files,
+        acts,
+    );
     sort_menu(
         ui,
         state.settings.sort_key,
@@ -217,6 +281,24 @@ fn toolbar_view(ui: &mut egui::Ui, state: &AppState, acts: &mut Vec<Action>) {
     {
         acts.push(Action::SetCollapseSequences(!collapse));
     }
+    if state.active == 0 {
+        let all = state.settings.show_all_files;
+        if ui
+            .add(egui::Button::selectable(all, "All files"))
+            .on_hover_text("List every file, not only media")
+            .clicked()
+        {
+            acts.push(Action::SetShowAllFiles(!all));
+        }
+        let dual = state.settings.dual_pane;
+        if ui
+            .add(egui::Button::selectable(dual, "2 panes"))
+            .on_hover_text("Second file pane (F3)")
+            .clicked()
+        {
+            acts.push(Action::ToggleDualPane);
+        }
+    }
 
     if state.settings.view_mode == ViewMode::Grid {
         theme::group_separator(ui);
@@ -234,11 +316,15 @@ fn toolbar_view(ui: &mut egui::Ui, state: &AppState, acts: &mut Vec<Action>) {
     }
 
     theme::group_separator(ui);
-    let selected = state.selection.items.len();
+    let selected = state.pane().selection.items.len();
     let mut counts = format!(
         "{} item{}",
-        state.entries.len(),
-        if state.entries.len() == 1 { "" } else { "s" }
+        state.pane().entries.len(),
+        if state.pane().entries.len() == 1 {
+            ""
+        } else {
+            "s"
+        }
     );
     if selected > 0 {
         counts.push_str(&format!(" · {selected} selected"));
@@ -252,10 +338,16 @@ fn kind_label(kind: MediaKind) -> &'static str {
         MediaKind::Video => "Video",
         MediaKind::Sequence => "Sequence",
         MediaKind::Audio => "Audio",
+        MediaKind::Other => "Other",
     }
 }
 
-fn kind_menu(ui: &mut egui::Ui, kinds: &BTreeSet<MediaKind>, acts: &mut Vec<Action>) {
+fn kind_menu(
+    ui: &mut egui::Ui,
+    kinds: &BTreeSet<MediaKind>,
+    show_other: bool,
+    acts: &mut Vec<Action>,
+) {
     let title = if kinds.is_empty() {
         "Type: All".to_owned()
     } else {
@@ -279,7 +371,10 @@ fn kind_menu(ui: &mut egui::Ui, kinds: &BTreeSet<MediaKind>, acts: &mut Vec<Acti
             MediaKind::Video,
             MediaKind::Sequence,
             MediaKind::Audio,
-        ] {
+        ]
+        .into_iter()
+        .chain(show_other.then_some(MediaKind::Other))
+        {
             let mut on = kinds.contains(&kind);
             if ui.checkbox(&mut on, kind_label(kind)).changed() {
                 let mut next = kinds.clone();
@@ -403,6 +498,7 @@ fn type_text(entry: &Entry) -> String {
         MediaKind::Image => "IMAGE".to_owned(),
         MediaKind::Video => "VIDEO".to_owned(),
         MediaKind::Audio => "AUDIO".to_owned(),
+        MediaKind::Other => extension_label(entry),
         MediaKind::Sequence => format!("SEQ ({}f)", frame_count(entry)),
     }
 }
@@ -562,6 +658,39 @@ fn paint_placeholder(painter: &Painter, area: Rect, kind: MediaKind, color: Colo
                 stroke,
             );
         }
+        MediaKind::Other => {
+            // generic document icon: page with a folded corner and text lines
+            let page = Rect::from_center_size(c, vec2(s * 0.85, s * 1.15));
+            let fold = page.width() * 0.32;
+            painter.add(Shape::closed_line(
+                vec![
+                    page.left_top(),
+                    pos2(page.max.x - fold, page.min.y),
+                    pos2(page.max.x, page.min.y + fold),
+                    page.right_bottom(),
+                    page.left_bottom(),
+                ],
+                stroke,
+            ));
+            painter.add(Shape::line(
+                vec![
+                    pos2(page.max.x - fold, page.min.y),
+                    pos2(page.max.x - fold, page.min.y + fold),
+                    pos2(page.max.x, page.min.y + fold),
+                ],
+                stroke,
+            ));
+            for i in 0..3 {
+                let y = page.min.y + page.height() * (0.5 + 0.16 * i as f32);
+                painter.line_segment(
+                    [
+                        pos2(page.min.x + page.width() * 0.18, y),
+                        pos2(page.max.x - page.width() * 0.18, y),
+                    ],
+                    stroke,
+                );
+            }
+        }
     }
 }
 
@@ -577,13 +706,17 @@ fn resolve_texture(
     edge: u32,
     priority: i32,
 ) -> Option<TextureHandle> {
+    let active = state.active;
     let AppState {
-        entries,
+        panes,
         textures,
         thumbs,
         ..
     } = state;
-    let entry = entries.get(idx)?;
+    let entry = panes.get(active)?.entries.get(idx)?;
+    if entry.kind == MediaKind::Other {
+        return None;
+    }
     if let Some(tex) = textures.get(&entry.path, edge) {
         return Some(tex);
     }
@@ -603,14 +736,21 @@ fn prefetch(
     range: std::ops::Range<usize>,
     edge: u32,
 ) {
+    let active = state.active;
     let AppState {
-        entries,
+        panes,
         textures,
         thumbs,
         ..
     } = state;
+    let Some(entries) = panes.get(active).map(|p| &p.entries) else {
+        return;
+    };
     for (n, idx) in range.enumerate() {
         let Some(entry) = entries.get(idx) else { break };
+        if entry.kind == MediaKind::Other {
+            continue;
+        }
         if textures.get(&entry.path, edge).is_some() {
             continue;
         }
@@ -630,8 +770,8 @@ fn refresh_epoch(
 ) {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     edge.hash(&mut hasher);
-    state.entries.len().hash(&mut hasher);
-    for entry in state.entries.get(range).unwrap_or(&[]) {
+    state.pane().entries.len().hash(&mut hasher);
+    for entry in state.pane().entries.get(range).unwrap_or(&[]) {
         entry.path.hash(&mut hasher);
         entry.size.hash(&mut hasher);
     }
@@ -669,16 +809,16 @@ fn grid_ui(
     let card_h = side + CARD_FOOTER;
     let cols = grid_columns(ui.available_width(), size);
     pane.cols = cols;
-    let n = state.entries.len();
+    let n = state.pane().entries.len();
     let rows = n.div_ceil(cols);
     let row_pitch = card_h + GAP;
     pane.page_items = ((pane.view_h / row_pitch).floor().max(1.0) as usize).saturating_mul(cols);
 
     let mut area = egui::ScrollArea::vertical()
-        .id_salt("gb_file_grid")
+        .id_salt(("gb_file_grid", pane.index))
         .auto_shrink([false, false]);
     if let Some(path) = pane.scroll_request.take()
-        && let Some(idx) = state.entries.iter().position(|e| e.path == path)
+        && let Some(idx) = state.pane().entries.iter().position(|e| e.path == path)
         && let Some(y) = scroll_target(idx / cols, row_pitch, pane.scroll_y, pane.view_h)
     {
         area = area.vertical_scroll_offset(y);
@@ -717,24 +857,29 @@ fn grid_ui(
                             size,
                             priority,
                         );
-                        any_missing |= tex.is_none();
-                        let Some(entry) = state.entries.get(idx) else {
+                        any_missing |= tex.is_none()
+                            && state
+                                .pane()
+                                .entries
+                                .get(idx)
+                                .is_some_and(|e| e.kind != MediaKind::Other);
+                        let Some(entry) = state.pane().entries.get(idx) else {
                             continue;
                         };
-                        let selected = state.selection.items.contains(&entry.path);
+                        let selected = state.pane().selection.items.contains(&entry.path);
                         let focused =
-                            state.selection.focused.as_deref() == Some(entry.path.as_path());
+                            state.pane().selection.focused.as_deref() == Some(entry.path.as_path());
                         let rating = state
                             .library
                             .annotations(&entry.representative_path())
                             .rating;
                         let resp = ui.interact(
                             rect,
-                            Id::new(("gb_card", &entry.path)),
+                            Id::new(("gb_card", pane.index, &entry.path)),
                             Sense::click_and_drag(),
                         );
                         let scrub = scrub_view(state, pane, ui, idx, &resp, rect, size);
-                        let Some(entry) = state.entries.get(idx) else {
+                        let Some(entry) = state.pane().entries.get(idx) else {
                             continue;
                         };
                         paint_card(
@@ -799,13 +944,14 @@ fn scrub_view(
     if any_down {
         return None;
     }
+    let active = state.active;
     let AppState {
-        entries,
+        panes,
         textures,
         thumbs,
         ..
     } = state;
-    let entry = entries.get(idx)?;
+    let entry = panes.get(active)?.entries.get(idx)?;
     if !matches!(entry.kind, MediaKind::Video | MediaKind::Sequence) {
         return None;
     }
@@ -973,6 +1119,13 @@ fn paint_card(
             Color32::from_black_alpha(170),
             Color32::WHITE,
         ),
+        MediaKind::Other => paint_badge(
+            painter,
+            pos2(thumb.max.x - 4.0, thumb.min.y + 4.0),
+            &extension_label(entry),
+            Color32::from_black_alpha(170),
+            Color32::WHITE,
+        ),
         MediaKind::Image => {}
     }
     // Name: centered, wrapped to at most two rows, elided beyond that.
@@ -1044,7 +1197,11 @@ fn list_ui(
             text_color,
         );
         if let Some(k) = key {
-            let resp = ui.interact(cell, Id::new(("gb_list_header", title)), Sense::click());
+            let resp = ui.interact(
+                cell,
+                Id::new(("gb_list_header", pane.index, title)),
+                Sense::click(),
+            );
             if resp.hovered() {
                 ui.painter().rect_stroke(
                     cell,
@@ -1082,12 +1239,12 @@ fn list_ui(
         x += w;
     }
 
-    let n = state.entries.len();
+    let n = state.pane().entries.len();
     let mut area = egui::ScrollArea::vertical()
-        .id_salt("gb_file_list")
+        .id_salt(("gb_file_list", pane.index))
         .auto_shrink([false, false]);
     if let Some(path) = pane.scroll_request.take()
-        && let Some(idx) = state.entries.iter().position(|e| e.path == path)
+        && let Some(idx) = state.pane().entries.iter().position(|e| e.path == path)
         && let Some(y) = scroll_target(idx, LIST_ROW_H, pane.scroll_y, pane.view_h)
     {
         area = area.vertical_scroll_offset(y);
@@ -1103,18 +1260,19 @@ fn list_ui(
                 let row_w = ui.available_width();
                 for idx in range {
                     let (rect, _) = ui.allocate_exact_size(vec2(row_w, LIST_ROW_H), Sense::hover());
-                    let Some(entry) = state.entries.get(idx) else {
+                    let Some(entry) = state.pane().entries.get(idx) else {
                         continue;
                     };
-                    let selected = state.selection.items.contains(&entry.path);
-                    let focused = state.selection.focused.as_deref() == Some(entry.path.as_path());
+                    let selected = state.pane().selection.items.contains(&entry.path);
+                    let focused =
+                        state.pane().selection.focused.as_deref() == Some(entry.path.as_path());
                     let rating = state
                         .library
                         .annotations(&entry.representative_path())
                         .rating;
                     let resp = ui.interact(
                         rect,
-                        Id::new(("gb_row", &entry.path)),
+                        Id::new(("gb_row", pane.index, &entry.path)),
                         Sense::click_and_drag(),
                     );
                     let visuals = ui.visuals();
@@ -1187,11 +1345,11 @@ fn item_interaction(
     idx: usize,
     resp: &egui::Response,
 ) {
-    let Some(entry) = state.entries.get(idx) else {
+    let Some(entry) = state.pane().entries.get(idx) else {
         return;
     };
     let path = entry.path.clone();
-    let selected = state.selection.items.contains(&path);
+    let selected = state.pane().selection.items.contains(&path);
     if resp.double_clicked() {
         acts.push(Action::Activate(path.clone()));
     } else if resp.clicked() {
@@ -1212,6 +1370,7 @@ fn item_interaction(
             state.selected_member_paths()
         } else {
             state
+                .pane()
                 .entries
                 .get(idx)
                 .map(Entry::member_paths)
@@ -1241,19 +1400,19 @@ fn context_menu_ui(
     target: Option<usize>,
     acts: &mut Vec<Action>,
 ) {
-    let target_entry: Option<Entry> = target.and_then(|i| state.entries.get(i).cloned());
+    let target_entry: Option<Entry> = target.and_then(|i| state.pane().entries.get(i).cloned());
     let selected: Vec<Entry> = match &target_entry {
-        Some(t) if !state.selection.items.contains(&t.path) => vec![t.clone()],
+        Some(t) if !state.pane().selection.items.contains(&t.path) => vec![t.clone()],
         _ => state.selected_entries().into_iter().cloned().collect(),
     };
     let has_sel = !selected.is_empty();
-    let current_folder = state.nav.current.clone();
+    let current_folder = state.pane().nav.current.clone();
 
     if let Some(t) = &target_entry {
         if menu_item(ui, "Open", true) {
             acts.push(Action::Activate(t.path.clone()));
         }
-        if menu_item(ui, "Open in viewer", true) {
+        if menu_item(ui, "Open in viewer", t.kind != MediaKind::Other) {
             acts.push(Action::OpenFullscreen(t.path.clone()));
         }
         if menu_item(ui, "Show in file manager", true) {
@@ -1271,6 +1430,20 @@ fn context_menu_ui(
         }
         if menu_item(ui, "Cut", true) {
             acts.push(Action::Cut);
+        }
+        if state.settings.dual_pane {
+            let other_ok = crate::actions::other_pane_target(
+                true,
+                state.pane().nav.current.as_deref(),
+                state.pane_at(state.other_index()).nav.current.as_deref(),
+            )
+            .is_ok();
+            if menu_item(ui, "Copy to other pane", other_ok) {
+                acts.push(Action::CopyToOtherPane);
+            }
+            if menu_item(ui, "Move to other pane", other_ok) {
+                acts.push(Action::MoveToOtherPane);
+            }
         }
     }
     if menu_item(
@@ -1304,7 +1477,7 @@ fn context_menu_ui(
         acts.push(Action::BeginNewFolder);
     }
     if target_entry.is_none() {
-        if menu_item(ui, "Select all", !state.entries.is_empty()) {
+        if menu_item(ui, "Select all", !state.pane().entries.is_empty()) {
             acts.push(Action::SelectAll);
         }
         if menu_item(ui, "Refresh", true) {
@@ -1421,14 +1594,14 @@ fn handle_keys(
     if ctx.egui_wants_keyboard_input()
         || state.fullscreen.is_some()
         || dialog_open(state)
-        || state.entries.is_empty()
+        || state.pane().entries.is_empty()
     {
         return;
     }
     let grid = state.settings.view_mode == ViewMode::Grid;
     let cols = if grid { pane.cols.max(1) as isize } else { 1 };
     let page = pane.page_items.max(1) as isize;
-    let end = state.entries.len() as isize;
+    let end = state.pane().entries.len() as isize;
     let moves: [(Key, isize); 8] = [
         (Key::ArrowUp, -cols),
         (Key::ArrowDown, cols),
@@ -1452,13 +1625,14 @@ fn handle_keys(
     }
     if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
         let focused = state
+            .pane()
             .selection
             .focused
             .clone()
             .filter(|p| state.entry(p).is_some());
         let target = focused.or_else(|| {
-            if state.selection.items.len() == 1 {
-                state.selection.items.iter().next().cloned()
+            if state.pane().selection.items.len() == 1 {
+                state.pane().selection.items.iter().next().cloned()
             } else {
                 None
             }
@@ -1522,7 +1696,7 @@ fn external_drops(
             Stroke::new(2.0, color),
             StrokeKind::Inside,
         );
-        let msg = match &state.nav.current {
+        let msg = match &state.pane().nav.current {
             Some(dir) => format!(
                 "Drop to copy into {}",
                 dir.file_name()
@@ -1549,7 +1723,7 @@ fn external_drops(
     if dropped.is_empty() || !over_pane {
         return;
     }
-    match state.nav.current.clone() {
+    match state.pane().nav.current.clone() {
         Some(dest) => acts.push(Action::Drop {
             paths: dropped,
             dest,
@@ -1557,6 +1731,63 @@ fn external_drops(
         }),
         None => state.info("Open a folder before dropping files"),
     }
+}
+
+/// Upper-case file extension for badges ("FILE" when there is none).
+fn extension_label(entry: &Entry) -> String {
+    std::path::Path::new(&entry.name)
+        .extension()
+        .map(|e| e.to_string_lossy().to_uppercase())
+        .filter(|e| !e.is_empty() && e.chars().count() <= 8)
+        .unwrap_or_else(|| "FILE".to_owned())
+}
+
+/// Dragging files over the pane's area: highlight it and, on release, move (Ctrl: copy) them into
+/// this pane's folder. Only in dual-pane mode; a drag that started in this same folder is ignored.
+fn pane_drop(ctx: &egui::Context, state: &AppState, outer: Rect, acts: &mut Vec<Action>) {
+    if !state.settings.dual_pane {
+        return;
+    }
+    let Some(payload) = egui::DragAndDrop::payload::<DragPaths>(ctx) else {
+        return;
+    };
+    let Some(pos) = ctx.pointer_latest_pos() else {
+        return;
+    };
+    let pane = state.pane();
+    if !outer.contains(pos) || pane.filters.scope != FilterScope::Folder {
+        return;
+    }
+    let Some(dest) = pane.nav.current.clone() else {
+        return;
+    };
+    if pane_drop_is_noop(&payload.0, &dest) {
+        return;
+    }
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        Id::new("gb_pane_drop_overlay"),
+    ));
+    painter.rect_stroke(
+        outer.shrink(2.0),
+        4.0,
+        Stroke::new(2.0, theme::ACCENT),
+        StrokeKind::Inside,
+    );
+    if ctx.input(|i| i.pointer.any_released()) {
+        let copy = ctx.input(|i| i.modifiers.ctrl);
+        acts.push(Action::Drop {
+            paths: payload.0.clone(),
+            dest,
+            copy,
+        });
+    }
+}
+
+/// A drop is ignored when every dragged path already lives directly in the target folder
+/// (the drag started in this pane).
+fn pane_drop_is_noop(paths: &[PathBuf], dest: &std::path::Path) -> bool {
+    paths.iter().all(|p| p.parent() == Some(dest))
 }
 
 #[cfg(test)]
@@ -1596,6 +1827,16 @@ mod tests {
         let s = format_date(Some(UNIX_EPOCH + Duration::from_secs(1_700_000_000)));
         assert_eq!(s.len(), 16);
         assert!(s.starts_with("2023-11-1"));
+    }
+
+    #[test]
+    fn same_folder_drop_is_ignored() {
+        let dest = std::path::Path::new("/a");
+        assert!(pane_drop_is_noop(&[PathBuf::from("/a/x.png")], dest));
+        assert!(!pane_drop_is_noop(
+            &[PathBuf::from("/a/x.png"), PathBuf::from("/b/y.png")],
+            dest
+        ));
     }
 
     #[test]

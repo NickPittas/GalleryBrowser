@@ -233,8 +233,8 @@ fn content(
         0.2,
     );
 
-    let index = state.entries.iter().position(|e| e.path == fs.path);
-    let total = state.entries.len();
+    let index = state.pane().entries.iter().position(|e| e.path == fs.path);
+    let total = state.pane().entries.len();
     let name = fs.name.clone();
     let Some(view) = fs.view.as_mut() else {
         return;

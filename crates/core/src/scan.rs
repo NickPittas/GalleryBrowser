@@ -24,6 +24,8 @@ pub struct ScanOptions {
     pub collapse_sequences: bool,
     /// Minimum frames to form a sequence (Python: 2).
     pub min_sequence_len: usize,
+    /// Also list every non-media regular file as `MediaKind::Other`.
+    pub show_all_files: bool,
 }
 
 impl Default for ScanOptions {
@@ -32,6 +34,7 @@ impl Default for ScanOptions {
             show_hidden: false,
             collapse_sequences: true,
             min_sequence_len: 2,
+            show_all_files: false,
         }
     }
 }
@@ -66,8 +69,10 @@ pub fn scan_folder(dir: &Path, opts: &ScanOptions) -> Result<Vec<Entry>> {
         if !opts.show_hidden && is_hidden(&path) {
             continue;
         }
-        let Some(kind) = classify(&path) else {
-            continue;
+        let kind = match classify(&path) {
+            Some(k) => k,
+            None if opts.show_all_files => MediaKind::Other,
+            None => continue,
         };
         // `fs::metadata` follows symlinks, so a link to a media file is browsable and a dangling one is skipped.
         let meta = match std::fs::metadata(&path) {
@@ -168,6 +173,7 @@ fn kind_rank(kind: MediaKind) -> u8 {
         MediaKind::Image => 1,
         MediaKind::Sequence => 2,
         MediaKind::Video => 3,
+        MediaKind::Other => 4,
     }
 }
 
@@ -355,6 +361,58 @@ mod tests {
         }
         sort_entries(&mut entries, SortKey::Modified, true);
         assert_eq!(names(&entries).first(), Some(&"b.png"));
+    }
+
+    #[test]
+    fn show_all_files_lists_non_media_as_other() {
+        let d = fixture();
+        touch(d.path(), "scene.blend", 3);
+        touch(d.path(), ".secret.txt", 1);
+        let off = scan_folder(d.path(), &ScanOptions::default()).expect("scan");
+        assert!(off.iter().all(|e| e.kind != MediaKind::Other));
+        let opts = ScanOptions {
+            show_all_files: true,
+            ..ScanOptions::default()
+        };
+        let on = scan_folder(d.path(), &opts).expect("scan");
+        let others: Vec<&str> = on
+            .iter()
+            .filter(|e| e.kind == MediaKind::Other)
+            .map(|e| e.name.as_str())
+            .collect();
+        assert_eq!(others, vec!["notes.txt", "scene.blend"]);
+        assert!(
+            on.iter()
+                .all(|e| e.kind != MediaKind::Other || e.sequence.is_none())
+        );
+        assert!(names(&on).contains(&"shot_[0001-0003].exr"));
+        assert!(!names(&on).contains(&".secret.txt"));
+        assert!(!names(&on).contains(&"subdir.png"));
+        let hidden = ScanOptions {
+            show_all_files: true,
+            show_hidden: true,
+            ..ScanOptions::default()
+        };
+        let all = scan_folder(d.path(), &hidden).expect("scan");
+        assert!(names(&all).contains(&".secret.txt"));
+    }
+
+    #[test]
+    fn kind_sort_puts_other_last() {
+        let d = tempfile::tempdir().expect("tempdir");
+        touch(d.path(), "a.txt", 1);
+        touch(d.path(), "b.mp4", 1);
+        touch(d.path(), "c.png", 1);
+        touch(d.path(), "d.wav", 1);
+        let opts = ScanOptions {
+            show_all_files: true,
+            ..ScanOptions::default()
+        };
+        let mut entries = scan_folder(d.path(), &opts).expect("scan");
+        sort_entries(&mut entries, SortKey::Kind, true);
+        assert_eq!(names(&entries), vec!["d.wav", "c.png", "b.mp4", "a.txt"]);
+        sort_entries(&mut entries, SortKey::Kind, false);
+        assert_eq!(names(&entries), vec!["a.txt", "b.mp4", "c.png", "d.wav"]);
     }
 
     #[test]

@@ -9,15 +9,14 @@ use gallerybrowser_media::{MetadataWorker, Thumbnailer};
 
 use crate::actions;
 use crate::batch_rename;
-use crate::breadcrumb;
-use crate::file_pane::{self, FilePaneState};
+use crate::file_pane;
 use crate::fullscreen;
 use crate::info_pane;
 use crate::preview::{self, PreviewState};
 use crate::settings_dialog;
 use crate::shortcuts;
 use crate::sidebar;
-use crate::state::{Action, AppState, Dialogs, Filters, Navigation, Selection, StatusKind};
+use crate::state::{Action, AppState, Dialogs, PaneState, StatusKind};
 use crate::textures::TextureCache;
 use crate::theme;
 use crate::tree::{self, TreeState};
@@ -48,7 +47,6 @@ pub struct GalleryApp {
     pub state: AppState,
     pub incoming: Option<std::sync::mpsc::Receiver<Vec<PathBuf>>>,
     tree: TreeState,
-    pane: FilePaneState,
     left_tab: LeftTab,
     status_seen: Option<(StatusKind, String)>,
     status_at: Instant,
@@ -98,11 +96,8 @@ impl GalleryApp {
             thumbs,
             metadata: MetadataWorker::new(),
             current_metadata: None,
-            nav: Navigation::default(),
-            scanned: Vec::new(),
-            entries: Vec::new(),
-            selection: Selection::default(),
-            filters: Filters::default(),
+            panes: [PaneState::default(), PaneState::default()],
+            active: 0,
             clipboard: None,
             status: None,
             dialogs: Dialogs::default(),
@@ -113,19 +108,30 @@ impl GalleryApp {
             quit_requested: false,
             folder_dialog: None,
             progress: None,
-            pending_select: None,
             pending_open: None,
             tree_generation: 0,
             library_generation: 0,
             poll_until: Instant::now(),
             synced_preview: None,
             synced_meta: None,
-            scan_note: None,
         };
         if !opts.paths.is_empty() {
             state.push(Action::OpenPaths(opts.paths));
         } else if let Some(p) = start_folder {
             state.push(Action::Navigate(p));
+        }
+        if state.settings.dual_pane {
+            let second = state
+                .settings
+                .last_folder_secondary
+                .clone()
+                .filter(|p| p.is_dir())
+                .or_else(|| state.settings.last_folder.clone().filter(|p| p.is_dir()));
+            if let Some(p) = second {
+                state.push(Action::FocusPane(1));
+                state.push(Action::Navigate(p));
+                state.push(Action::FocusPane(0));
+            }
         }
         actions::dispatch_pending(&mut state, &cc.egui_ctx);
         if let Some(e) = startup_error {
@@ -135,7 +141,6 @@ impl GalleryApp {
             state,
             incoming: opts.incoming,
             tree: TreeState::default(),
-            pane: FilePaneState::default(),
             left_tab: LeftTab::Folders,
             status_seen: None,
             status_at: Instant::now(),
@@ -146,10 +151,16 @@ impl GalleryApp {
 
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
         let state = &mut self.state;
-        let has_sel = !state.selection.items.is_empty() || state.selection.focused.is_some();
-        let one = state.selection.items.len() == 1
-            || (state.selection.items.is_empty() && state.selection.focused.is_some());
-        let many = state.selection.items.len() >= 2;
+        let sel = &state.pane().selection;
+        let has_sel = !sel.items.is_empty() || sel.focused.is_some();
+        let one = sel.items.len() == 1 || (sel.items.is_empty() && sel.focused.is_some());
+        let many = sel.items.len() >= 2;
+        let other_ok = crate::actions::other_pane_target(
+            state.settings.dual_pane,
+            state.pane().nav.current.as_deref(),
+            state.pane_at(state.other_index()).nav.current.as_deref(),
+        )
+        .is_ok();
         let can_paste = state.clipboard.is_some();
         let (can_undo, can_redo) = (state.fileops.can_undo(), state.fileops.can_redo());
         let undo_label = state.fileops.undo_label();
@@ -162,7 +173,7 @@ impl GalleryApp {
                     ui,
                     "New Folder…",
                     "Ctrl+Shift+N",
-                    state.nav.current.is_some(),
+                    state.pane().nav.current.is_some(),
                 ) {
                     state.push(Action::BeginNewFolder);
                 }
@@ -197,9 +208,16 @@ impl GalleryApp {
                     ui,
                     "Paste",
                     "Ctrl+V",
-                    can_paste && state.nav.current.is_some(),
+                    can_paste && state.pane().nav.current.is_some(),
                 ) {
                     state.push(Action::Paste { dest: None });
+                }
+                ui.separator();
+                if item(ui, "Copy to Other Pane", "Ctrl+Shift+C", other_ok) {
+                    state.push(Action::CopyToOtherPane);
+                }
+                if item(ui, "Move to Other Pane", "Ctrl+Shift+M", other_ok) {
+                    state.push(Action::MoveToOtherPane);
                 }
                 ui.separator();
                 if item(ui, "Rename…", "F2", one) {
@@ -216,7 +234,7 @@ impl GalleryApp {
                     state.push(Action::RequestDeletePermanently);
                 }
                 ui.separator();
-                if item(ui, "Select All", "Ctrl+A", !state.entries.is_empty()) {
+                if item(ui, "Select All", "Ctrl+A", !state.pane().entries.is_empty()) {
                     state.push(Action::SelectAll);
                 }
             });
@@ -241,6 +259,12 @@ impl GalleryApp {
                     state.push(Action::SetCollapseSequences(
                         !state.settings.collapse_sequences,
                     ));
+                }
+                if check_item(ui, "Show All Files", "", state.settings.show_all_files) {
+                    state.push(Action::SetShowAllFiles(!state.settings.show_all_files));
+                }
+                if check_item(ui, "Second Pane", "F3", state.settings.dual_pane) {
+                    state.push(Action::ToggleDualPane);
                 }
                 if item(ui, "Refresh", "F5", true) {
                     state.push(Action::Refresh);
@@ -324,7 +348,7 @@ impl GalleryApp {
                         ui.label("Working…");
                     }
                 }
-                if let Some(note) = &state.scan_note {
+                if let Some(note) = &state.pane().scan_note {
                     ui.separator();
                     ui.label(RichText::new(note).color(theme::WARNING));
                 }
@@ -511,7 +535,10 @@ impl eframe::App for GalleryApp {
 
     /// Save settings (incl. last_folder, volume), shut down preview/player and workers.
     fn on_exit(&mut self) {
-        self.state.settings.last_folder = self.state.nav.current.clone();
+        self.state.settings.last_folder = self.state.panes[0].nav.current.clone();
+        if self.state.settings.dual_pane {
+            self.state.settings.last_folder_secondary = self.state.panes[1].nav.current.clone();
+        }
         actions::save_settings(&mut self.state);
         self.state.preview.shutdown();
     }
@@ -521,7 +548,6 @@ impl GalleryApp {
     /// Lay out all normal panels into the root `ui`.
     fn panels(&mut self, ui: &mut egui::Ui) {
         egui::Panel::top("menu_bar").show(ui, |ui| self.menu_bar(ui));
-        egui::Panel::top("breadcrumb").show(ui, |ui| breadcrumb::show(ui, &mut self.state));
         egui::Panel::bottom("status_bar").show(ui, |ui| self.status_bar(ui));
 
         egui::Panel::left("left_panel")
@@ -557,8 +583,25 @@ impl GalleryApp {
                 });
         }
 
-        egui::CentralPanel::default_margins().show(ui, |ui| {
-            file_pane::show(ui, &mut self.state, &mut self.pane)
+        egui::CentralPanel::no_frame().show(ui, |ui| {
+            if !self.state.settings.dual_pane {
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin::same(8))
+                    .show(ui, |ui| file_pane::show(ui, &mut self.state, 0));
+                return;
+            }
+            // two panes side by side with a draggable divider; each is driven by the tree when active
+            let pane_frame = egui::Frame::NONE.inner_margin(egui::Margin::same(6));
+            let total = ui.available_width();
+            egui::Panel::left("pane_left")
+                .resizable(true)
+                .default_size(total / 2.0)
+                .size_range(240.0..=(total - 240.0).max(240.0))
+                .frame(pane_frame)
+                .show(ui, |ui| file_pane::show(ui, &mut self.state, 0));
+            egui::CentralPanel::no_frame().show(ui, |ui| {
+                pane_frame.show(ui, |ui| file_pane::show(ui, &mut self.state, 1));
+            });
         });
     }
 }
@@ -572,7 +615,7 @@ fn window_title(state: &AppState) -> String {
         );
         return format!("GalleryBrowser — {name}");
     }
-    match &state.nav.current {
+    match &state.pane().nav.current {
         Some(p) => format!("GalleryBrowser — {}", p.display()),
         None => "GalleryBrowser".to_string(),
     }
@@ -673,12 +716,14 @@ fn prompt(
 // ---- status text --------------------------------------------------------------------
 
 fn source_label(state: &AppState) -> String {
-    let mut parts = vec![match (state.filters.scope, &state.nav.current) {
-        (FilterScope::Library, _) => "Library".to_string(),
-        (_, Some(p)) => p.display().to_string(),
-        (_, None) => "No folder open".to_string(),
-    }];
-    let q = &state.filters.query;
+    let mut parts = vec![
+        match (state.pane().filters.scope, &state.pane().nav.current) {
+            (FilterScope::Library, _) => "Library".to_string(),
+            (_, Some(p)) => p.display().to_string(),
+            (_, None) => "No folder open".to_string(),
+        },
+    ];
+    let q = &state.pane().filters.query;
     for t in &q.tags {
         parts.push(format!("tag:{t}"));
     }
@@ -691,7 +736,7 @@ fn source_label(state: &AppState) -> String {
         Some(RatingFilter::AtLeast(n)) => parts.push(format!("rating:≥{n}")),
         None => {}
     }
-    for k in &state.filters.kinds {
+    for k in &state.pane().filters.kinds {
         parts.push(format!(
             "type:{}",
             match k {
@@ -699,23 +744,25 @@ fn source_label(state: &AppState) -> String {
                 MediaKind::Video => "video",
                 MediaKind::Sequence => "sequence",
                 MediaKind::Audio => "audio",
+                MediaKind::Other => "other",
             }
         ));
     }
-    if !state.filters.search.trim().is_empty() {
-        parts.push(format!("search:{}", state.filters.search.trim()));
+    if !state.pane().filters.search.trim().is_empty() {
+        parts.push(format!("search:{}", state.pane().filters.search.trim()));
     }
     parts.join("  ·  ")
 }
 
 fn count_label(state: &AppState) -> String {
     let seqs = state
+        .pane()
         .entries
         .iter()
         .filter(|e| e.sequence.is_some())
         .count();
-    let total = state.scanned.len();
-    let shown = state.entries.len();
+    let total = state.pane().scanned.len();
+    let shown = state.pane().entries.len();
     let mut s = if shown == total {
         format!("{shown} items")
     } else {

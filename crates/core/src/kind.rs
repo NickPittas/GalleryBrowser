@@ -9,6 +9,8 @@ pub enum MediaKind {
     Video,
     Sequence,
     Audio,
+    /// Non-media file; only produced by scanning with `show_all_files`, never by [`classify`].
+    Other,
 }
 
 /// Lower-case extensions without dot. Superset of the Python app (png jpg jpeg tif tiff bmp gif webp exr tga psd)

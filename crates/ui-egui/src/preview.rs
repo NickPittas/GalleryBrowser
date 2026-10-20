@@ -277,6 +277,8 @@ fn decimate_to_fit(image: &RgbaImage, max_side: usize) -> Option<([usize; 2], Ve
 enum Phase {
     Empty,
     Loading,
+    /// Non-media file: nothing to decode.
+    NoPreview,
     Still,
     Movie,
     Failed(String),
@@ -376,6 +378,11 @@ impl MediaView {
             }
             (MediaKind::Image, _) => LoadTarget::Still(entry.path.clone()),
             (MediaKind::Video | MediaKind::Audio, _) => LoadTarget::Movie(entry.path.clone()),
+            (MediaKind::Other, _) => {
+                self.loader.invalidate();
+                self.phase = Phase::NoPreview;
+                return;
+            }
         };
         match self.loader.request(target) {
             Ok(()) => self.phase = Phase::Loading,
@@ -496,6 +503,7 @@ impl MediaView {
         let message: Option<(String, Color32)> = match &self.phase {
             Phase::Empty => Some(("Select an item to preview".to_string(), Color32::GRAY)),
             Phase::Loading => Some(("Loading…".to_string(), Color32::GRAY)),
+            Phase::NoPreview => Some(("No preview".to_string(), Color32::GRAY)),
             Phase::Failed(e) => Some((
                 format!("Cannot preview this file\n{e}"),
                 Color32::from_rgb(235, 110, 100),
