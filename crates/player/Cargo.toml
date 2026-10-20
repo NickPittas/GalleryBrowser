@@ -11,13 +11,11 @@ workspace = true
 
 [dependencies]
 gallerybrowser-media = { workspace = true }
-filmcraft-time = { workspace = true }
-filmcraft-frame = { workspace = true }
 filmcraft-media = { workspace = true }
 cpal = { workspace = true }
 crossbeam-channel = { workspace = true }
-thiserror = { workspace = true }
 log = { workspace = true }
 
 [dev-dependencies]
+filmcraft-frame = { workspace = true }
 tempfile = { workspace = true }

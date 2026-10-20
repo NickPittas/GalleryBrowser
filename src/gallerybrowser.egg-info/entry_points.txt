@@ -1,0 +1,5 @@
+[console_scripts]
+gallerybrowser = gallerybrowser.__main__:main
+
+[gui_scripts]
+gallerybrowser-gui = gallerybrowser.__main__:main

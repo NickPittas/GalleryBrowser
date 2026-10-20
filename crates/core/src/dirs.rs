@@ -1,6 +1,17 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::Result;
+use directories::BaseDirs;
+
+use crate::{CoreError, Result};
+
+const APP: &str = "gallerybrowser";
+
+/// Content of the `CACHEDIR.TAG` file (https://bford.info/cachedir/) so backup tools skip the cache.
+const CACHEDIR_TAG: &str = "Signature: 8a477f597d28d172789f06886806bc55\n\
+# This file is a cache directory tag created by GalleryBrowser.\n\
+# For information about cache directory tags, see:\n\
+#\thttps://bford.info/cachedir/\n";
 
 /// Per-user directories. Every directory is created and PROBED FOR WRITABILITY (create+delete a temp file);
 /// on failure falls back to `$XDG_*`-independent `~/.local/state/gallerybrowser/<kind>`, then to a
@@ -19,11 +30,43 @@ pub struct AppDirs {
 
 impl AppDirs {
     pub fn resolve() -> Result<Self> {
-        Err(crate::CoreError::NoWritableDir("config"))
+        let base = BaseDirs::new();
+        let home = base.as_ref().map(|b| b.home_dir().to_path_buf());
+        let xdg = |pick: fn(&BaseDirs) -> PathBuf| base.as_ref().map(|b| pick(b).join(APP));
+
+        let config = resolve_dir(
+            "config",
+            xdg(|b| b.config_dir().to_path_buf()),
+            home.as_deref(),
+        )?;
+        let data = resolve_dir("data", xdg(|b| b.data_dir().to_path_buf()), home.as_deref())?;
+        let cache = resolve_dir(
+            "cache",
+            xdg(|b| b.cache_dir().to_path_buf()),
+            home.as_deref(),
+        )?;
+        let runtime = base
+            .as_ref()
+            .and_then(|b| b.runtime_dir())
+            .map(|r| r.join(APP))
+            .and_then(|p| ensure_writable_dir(&p).ok())
+            .unwrap_or_else(|| cache.clone());
+
+        if let Err(e) = write_cachedir_tag(&cache) {
+            log::warn!("could not write CACHEDIR.TAG in {}: {e}", cache.display());
+        }
+        Ok(Self {
+            config,
+            data,
+            cache,
+            runtime,
+        })
     }
+
     /// Python-era SQLite database (`~/.cache/gallerybrowser/database.sqlite`) if present, for one-time import.
     pub fn legacy_database(&self) -> Option<PathBuf> {
-        None
+        let path = self.cache.join("database.sqlite");
+        path.is_file().then_some(path)
     }
     pub fn settings_file(&self) -> PathBuf {
         self.config.join("settings.json")
@@ -36,5 +79,169 @@ impl AppDirs {
     }
     pub fn instance_socket(&self) -> PathBuf {
         self.runtime.join("instance.sock")
+    }
+}
+
+/// First writable of: `primary`, `~/.local/state/gallerybrowser/<kind>`, a private temp dir.
+fn resolve_dir(
+    kind: &'static str,
+    primary: Option<PathBuf>,
+    home: Option<&Path>,
+) -> Result<PathBuf> {
+    let mut candidates = Vec::with_capacity(3);
+    candidates.extend(primary);
+    if let Some(home) = home {
+        candidates.push(home.join(".local").join("state").join(APP).join(kind));
+    }
+    candidates.push(std::env::temp_dir().join(format!("{APP}-{}-{kind}", user_tag())));
+    first_writable(&candidates).ok_or(CoreError::NoWritableDir(kind))
+}
+
+fn first_writable(candidates: &[PathBuf]) -> Option<PathBuf> {
+    for dir in candidates {
+        match ensure_writable_dir(dir) {
+            Ok(path) => return Some(path),
+            Err(e) => log::warn!("directory {} is not usable: {e}", dir.display()),
+        }
+    }
+    None
+}
+
+/// Name component distinguishing users sharing one temp dir (letters/digits only).
+fn user_tag() -> String {
+    let raw = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .unwrap_or_default();
+    let tag: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .take(32)
+        .collect();
+    if tag.is_empty() {
+        "user".to_string()
+    } else {
+        tag
+    }
+}
+
+/// Create `dir` (mode 0700 for new directories) and prove it is writable by creating and deleting a file.
+fn ensure_writable_dir(dir: &Path) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)?;
+    if !std::fs::metadata(dir)?.is_dir() {
+        return Err(std::io::Error::other("not a directory"));
+    }
+    probe_writable(dir)?;
+    Ok(dir.to_path_buf())
+}
+
+fn probe_writable(dir: &Path) -> std::io::Result<()> {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let probe = dir.join(format!(
+        ".write-probe-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)?;
+    std::fs::remove_file(&probe)
+}
+
+fn write_cachedir_tag(cache: &Path) -> std::io::Result<()> {
+    let tag = cache.join("CACHEDIR.TAG");
+    if tag.exists() {
+        return Ok(());
+    }
+    std::fs::write(tag, CACHEDIR_TAG)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn creates_missing_directories_recursively() {
+        let t = tempfile::tempdir().expect("tempdir");
+        let target = t.path().join("a").join("b");
+        let got = ensure_writable_dir(&target).expect("create");
+        assert_eq!(got, target);
+        assert!(target.is_dir());
+        // the probe file is cleaned up
+        assert_eq!(std::fs::read_dir(&target).expect("read").count(), 0);
+    }
+
+    #[test]
+    fn existing_read_only_dir_is_rejected_and_fallback_used() {
+        let t = tempfile::tempdir().expect("tempdir");
+        let ro = t.path().join("ro");
+        std::fs::create_dir(&ro).expect("mkdir");
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).expect("chmod");
+        let fallback = t.path().join("fallback");
+        let got = first_writable(&[ro.clone(), fallback.clone()]);
+        // Root ignores permission bits: then the read-only dir is genuinely writable and chosen.
+        let writable_anyway = probe_writable(&ro).is_ok();
+        std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).expect("chmod back");
+        if writable_anyway {
+            assert_eq!(got, Some(ro));
+        } else {
+            assert_eq!(got, Some(fallback.clone()));
+            assert!(fallback.is_dir());
+        }
+    }
+
+    #[test]
+    fn file_in_the_way_falls_back() {
+        let t = tempfile::tempdir().expect("tempdir");
+        let blocked = t.path().join("blocked");
+        std::fs::write(&blocked, b"x").expect("write");
+        let fallback = t.path().join("fb");
+        assert_eq!(
+            first_writable(&[blocked.join("sub"), blocked, fallback.clone()]),
+            Some(fallback)
+        );
+    }
+
+    #[test]
+    fn no_candidates_means_none() {
+        assert_eq!(first_writable(&[]), None);
+    }
+
+    #[test]
+    fn cachedir_tag_written_once_and_legacy_db_detected() {
+        let t = tempfile::tempdir().expect("tempdir");
+        let dirs = AppDirs {
+            config: t.path().join("config"),
+            data: t.path().join("data"),
+            cache: t.path().to_path_buf(),
+            runtime: t.path().join("run"),
+        };
+        write_cachedir_tag(&dirs.cache).expect("tag");
+        let text = std::fs::read_to_string(dirs.cache.join("CACHEDIR.TAG")).expect("read");
+        assert!(text.starts_with("Signature: 8a477f597d28d172789f06886806bc55"));
+        write_cachedir_tag(&dirs.cache).expect("tag again");
+
+        assert_eq!(dirs.legacy_database(), None);
+        std::fs::write(dirs.cache.join("database.sqlite"), b"").expect("write");
+        assert_eq!(
+            dirs.legacy_database(),
+            Some(dirs.cache.join("database.sqlite"))
+        );
+        assert_eq!(dirs.settings_file(), dirs.config.join("settings.json"));
+        assert_eq!(dirs.instance_socket(), dirs.runtime.join("instance.sock"));
+    }
+
+    #[test]
+    fn user_tag_is_path_safe() {
+        assert!(
+            user_tag()
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        );
     }
 }

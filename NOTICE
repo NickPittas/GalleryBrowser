@@ -1,0 +1,23 @@
+GalleryBrowser
+Third-party notices
+
+GalleryBrowser uses the following ArtCraft crates, pinned by git revision in the root Cargo.toml
+([workspace.dependencies]). They are licensed MIT OR Apache-2.0.
+Copyright (c) ArtCraft Team and contributors.
+
+  filmcraft-time, filmcraft-frame, filmcraft-media, filmcraft-codecs
+      https://github.com/storytold/filmcraft  rev 70f0fc7a75f2681bc18302e67eaf0c9d41c68873
+  photocraft-codecs, photocraft-psd
+      https://github.com/storytold/photocraft  rev 872748fb5b2a53e09dd4e385e31968d985c0515b
+  lightcraft-catalog, lightcraft-preview, lightcraft-meta, lightcraft-raster
+      https://github.com/storytold/lightcraft  rev 5fe74557eca64638b1f9015c9769f7e52a889fa2
+  craft-ui
+      https://github.com/storytold/craft-libs  rev 5c874d51eeb3de70e735c8ce87a59a7dedd47675
+
+Code adapted from ArtCraft sources is marked with comments at the point of adaptation.
+
+symphonia (MPL-2.0) is used, unmodified, through filmcraft-codecs. Its source is available from
+https://github.com/pdeljanov/Symphonia.
+
+Other dependencies (egui/eframe, wgpu, cpal, rusqlite, and others) are used under their own licenses;
+see Cargo.lock for the full list.

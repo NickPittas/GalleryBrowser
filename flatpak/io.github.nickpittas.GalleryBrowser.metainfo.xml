@@ -3,27 +3,26 @@
   <id>io.github.nickpittas.GalleryBrowser</id>
 
   <name>GalleryBrowser</name>
-  <summary>Linux-native asset management for images and videos</summary>
+  <summary>Linux-native asset browser for video, images and sequences</summary>
 
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
 
   <description>
     <p>
-      GalleryBrowser is a Linux-native gallery and asset browser for managing
-      images and video files. It supports browsing, previewing, and organizing
-      media assets including EXR image sequences, MOV/MP4 video files, and
-      common image formats.
+      GalleryBrowser is a Linux-native asset browser for video first, plus images and
+      numbered image sequences. It is written in Rust on the egui and wgpu stack, with
+      pure-Rust media decoding (no FFmpeg or GStreamer needed), and plays MOV, MP4, MXF,
+      MKV and AVI files in ProRes, DNxHD/DNxHR, H.264, HEVC and AV1.
     </p>
     <p>Features include:</p>
     <ul>
-      <li>Browse and preview images and videos in a modern dark interface</li>
-      <li>EXR image sequence playback with RAM preview</li>
-      <li>Video scrubbing and frame stepping for MOV, MP4, and other formats</li>
-      <li>Drag-and-drop file management with copy and move support</li>
+      <li>Browse and preview video, images and image sequences in a dark, fast interface</li>
+      <li>Frame-accurate scrubbing, frame stepping and audio playback for video</li>
+      <li>EXR and other numbered image sequence playback</li>
+      <li>Copy, move, rename and trash with a background worker that never overwrites</li>
       <li>Batch rename with chainable operations and live preview</li>
-      <li>Favorites and recent folders for quick navigation</li>
-      <li>Tag-based asset organization</li>
+      <li>Favorites, recent folders, tags, collections and ratings</li>
     </ul>
   </description>
 
@@ -39,6 +38,11 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.2.0" date="2026-10-20">
+      <description>
+        <p>Rewritten in Rust on the ArtCraft stack (egui, wgpu, pure-Rust media) with video-first browsing and playback.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-02-27">
       <description>
         <p>Initial release with core gallery browsing, preview, and file management features.</p>

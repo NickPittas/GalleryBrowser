@@ -4,19 +4,25 @@
 //! stills through `filmcraft-media`/`photocraft-codecs`, PSD/PSB through `photocraft-psd`,
 //! EXIF through `lightcraft-meta`, thumbnails through `lightcraft-preview`.
 
+mod comfy;
+mod guard;
 pub mod image;
 pub mod metadata;
 pub mod open;
+mod png_text;
+mod scrub;
 pub mod thumbs;
 
 pub use filmcraft_frame::{AudioBuffer, VideoFrame};
-pub use filmcraft_media::{FrameRequest, MediaInfo, MediaKind as SourceKind, MediaSource, SharedSource};
+pub use filmcraft_media::{
+    FrameRequest, MediaInfo, MediaKind as SourceKind, MediaSource, SharedSource,
+};
 pub use filmcraft_time::{FrameRate, Tick};
 
 pub use image::{RgbaImage, frame_to_rgba};
 pub use metadata::{AudioStreamMeta, ComfyMetadata, MediaMetadata, MetadataWorker, probe};
 pub use open::{open, open_sequence};
-pub use thumbs::{ThumbResult, Thumbnailer, ThumbnailerConfig};
+pub use thumbs::{ScrubSlot, ThumbResult, Thumbnailer, ThumbnailerConfig};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum MediaError {

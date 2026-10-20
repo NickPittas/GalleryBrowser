@@ -1,0 +1,148 @@
+Metadata-Version: 2.4
+Name: gallerybrowser
+Version: 0.1.0
+Summary: Linux-native asset management application for images and videos
+Author-email: Nick Pittas <nick@example.com>
+License-Expression: MIT
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: End Users/Desktop
+Classifier: Operating System :: POSIX :: Linux
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Multimedia :: Graphics :: Viewers
+Classifier: Topic :: Multimedia :: Video :: Display
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: PyQt6>=6.5.0
+Requires-Dist: SQLAlchemy>=2.0.0
+Requires-Dist: alembic>=1.12.0
+Requires-Dist: Pillow>=10.0.0
+Requires-Dist: imageio>=2.31.0
+Requires-Dist: imageio-ffmpeg>=0.4.8
+Requires-Dist: pymediainfo>=6.0.0
+Requires-Dist: python-magic>=0.4.27
+Requires-Dist: PyGObject>=3.44.0
+Requires-Dist: appdirs>=1.4.4
+Requires-Dist: python-dateutil>=2.8.0
+Requires-Dist: qtawesome>=1.4.0
+Requires-Dist: fileseq>=2.0.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: openimageio>=3.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-qt>=4.2.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+
+# GalleryBrowser
+
+A Linux-native asset management application for viewing and organizing images and videos, with special support for ComfyUI-generated content.
+
+## Features
+
+- **3-Pane Interface**: Tree navigation, file grid/list, and preview/info panel
+- **Metadata Preview**: Image and video technical metadata in the info pane
+- **Advanced Preview**: GStreamer-based playback for all major formats
+- **File Management**: Copy, move, delete, batch rename with tokens
+- **Organization**: Tags, collections, ratings, and folder/library filters
+- **Image Sequences**: Detect and play numbered image sequences
+- **Linux Integration**: Context menus, single instance, Flatpak support
+
+## Supported Formats
+
+**Images**: PNG, JPG, TIFF, BMP, GIF, WEBP, EXR, TGA, PSD
+**Videos**: MP4, MOV, AVI, MKV, MXF, ProRes, H.264, H.265, AV1
+
+## Installation
+
+### Flatpak (Recommended)
+
+```bash
+flatpak install flathub com.nickpittas.gallerybrowser
+flatpak run com.nickpittas.gallerybrowser
+```
+
+### From Source
+
+```bash
+# Clone repository
+git clone https://github.com/NickPittas/GalleryBrowser.git
+cd GalleryBrowser
+
+# Create virtual environment
+python3 -m venv venv --system-site-packages
+source venv/bin/activate
+
+# Install in development mode
+pip install -e ".[dev]"
+
+# Run
+gallerybrowser
+```
+
+PyGObject/GStreamer bindings come from system packages on Linux, so a plain isolated
+virtualenv will usually not be enough for video preview or some UI tests.
+
+## Development
+
+### Setup Development Environment
+
+```bash
+python3 -m venv venv --system-site-packages
+source venv/bin/activate
+pip install -e ".[dev]"
+```
+
+### Run Tests
+
+```bash
+pytest
+```
+
+### Code Formatting
+
+```bash
+black src/ tests/
+ruff check src/ tests/
+```
+
+## Usage
+
+### Basic Navigation
+
+- **Open Folder**: `Ctrl+O` or File → Open Folder
+- **Navigate**: Click folders in left tree pane
+- **View Files**: Grid or List view in center pane
+- **Preview**: Select file to see preview in right pane
+
+### File Operations
+
+- **Copy**: `Ctrl+C`
+- **Cut**: `Ctrl+X`
+- **Paste**: `Ctrl+V`
+- **Delete**: `Del` (moves to trash)
+- **Rename**: `F2`
+- **Batch Rename**: Select multiple files, right-click → Batch Rename
+
+### ComfyUI Metadata
+
+ComfyUI-specific metadata parsing is still a follow-up item. Current builds focus on
+filesystem browsing, previews, and DB-backed organization features.
+
+### Keyboard Shortcuts
+
+See `docs/user_guide/KEYBOARD_SHORTCUTS.md`
+
+## Architecture
+
+See `docs/DESIGN.md` for detailed architecture and design decisions.
+
+## License
+
+MIT License - See LICENSE file for details.
+
+## Acknowledgments
+
+Inspired by KAssetManager for Windows.

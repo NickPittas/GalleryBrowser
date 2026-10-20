@@ -3,7 +3,7 @@
 Type=Application
 Name=GalleryBrowser
 Comment=Linux-native asset management application for images and videos
-Exec=gallerybrowser
+Exec=gallerybrowser %F
 Icon=io.github.nickpittas.GalleryBrowser
 Terminal=false
 Categories=Graphics;Viewer;Photography;

@@ -14,15 +14,19 @@ pub mod settings;
 
 pub use dirs::AppDirs;
 pub use entry::Entry;
-pub use kind::{MediaKind, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS, classify};
-pub use scan::{ScanOptions, SortKey, list_subfolders, scan_folder, sort_entries};
+pub use kind::{AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, MediaKind, VIDEO_EXTENSIONS, classify};
+pub use scan::{ScanOptions, SortKey, is_hidden, list_subfolders, scan_folder, sort_entries};
 pub use sequence::{Sequence, SequenceFrame, detect_sequences};
-pub use settings::{Settings, Theme, ViewMode, FilterScope};
+pub use settings::{FilterScope, Settings, Theme, ViewMode};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
     #[error("I/O error at {path}: {source}")]
-    Io { path: std::path::PathBuf, #[source] source: std::io::Error },
+    Io {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("settings error: {0}")]
     Settings(String),
     #[error("no writable directory for {0}")]

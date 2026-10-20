@@ -31,7 +31,10 @@ pub struct Selection {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ClipMode { Copy, Cut }
+pub enum ClipMode {
+    Copy,
+    Cut,
+}
 
 #[derive(Clone, Debug)]
 pub struct Clipboard {
@@ -57,7 +60,10 @@ pub struct Navigation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StatusKind { Info, Error }
+pub enum StatusKind {
+    Info,
+    Error,
+}
 
 #[derive(Clone, Debug)]
 pub struct Status {
@@ -92,25 +98,40 @@ pub enum Action {
     Up,
     Refresh,
     // selection
-    Select { path: PathBuf, mode: SelectMode },
+    Select {
+        path: PathBuf,
+        mode: SelectMode,
+    },
     SelectAll,
     ClearSelection,
     /// Move focus by delta in the visible list (arrows; grid passes ±columns for up/down), extend = Shift.
-    MoveFocus { delta: isize, extend: bool },
+    MoveFocus {
+        delta: isize,
+        extend: bool,
+    },
     /// Enter/double-click: folder → navigate; media → fullscreen viewer.
     Activate(PathBuf),
     // file ops (act on selection, sequences expanded via Entry::member_paths)
     Copy,
     Cut,
     /// Paste clipboard into `dest` (None = current folder).
-    Paste { dest: Option<PathBuf> },
+    Paste {
+        dest: Option<PathBuf>,
+    },
     /// External or internal drop: copy (Ctrl) or move.
-    Drop { paths: Vec<PathBuf>, dest: PathBuf, copy: bool },
+    Drop {
+        paths: Vec<PathBuf>,
+        dest: PathBuf,
+        copy: bool,
+    },
     Trash,
     RequestDeletePermanently,
     DeletePermanently(Vec<PathBuf>),
     BeginRename,
-    Rename { from: PathBuf, new_name: String },
+    Rename {
+        from: PathBuf,
+        new_name: String,
+    },
     BeginBatchRename,
     BatchRename(RenamePlan),
     BeginNewFolder,
@@ -135,7 +156,10 @@ pub enum Action {
     SetQuery(LibraryQuery),
     SetSearch(String),
     SetKinds(BTreeSet<MediaKind>),
-    SetSort { key: SortKey, ascending: bool },
+    SetSort {
+        key: SortKey,
+        ascending: bool,
+    },
     SetViewMode(ViewMode),
     SetThumbnailSize(u32),
     SetCollapseSequences(bool),
@@ -181,6 +205,26 @@ pub struct AppState {
     /// Actions queued by panels this frame; drained by `actions::dispatch_pending`.
     pub pending: Vec<Action>,
     pub quit_requested: bool,
+    // --- Shell additions ---
+    /// Receiver of the native "Open Folder" dialog running on its own thread.
+    pub folder_dialog: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
+    /// (done, total) of the running file operation.
+    pub progress: Option<(u64, u64)>,
+    /// Select this entry after the next refresh (new/renamed/opened item).
+    pub pending_select: Option<PathBuf>,
+    /// Open this entry fullscreen after the next refresh (file given on the command line).
+    pub pending_open: Option<PathBuf>,
+    /// Bumped whenever the folder tree caches must be dropped (file ops, refresh, settings).
+    pub tree_generation: u64,
+    /// Bumped on every library mutation (tag/collection lists are cached per generation).
+    pub library_generation: u64,
+    /// Keep polling workers (thumbnails) until this instant.
+    pub poll_until: std::time::Instant,
+    /// Focus last pushed to the preview pane / metadata worker.
+    pub synced_preview: Option<PathBuf>,
+    pub synced_meta: Option<PathBuf>,
+    /// Entries of the Library scope could not be fully loaded etc. — human readable scan note.
+    pub scan_note: Option<String>,
 }
 
 impl AppState {
@@ -192,18 +236,34 @@ impl AppState {
     }
     /// Selected entries in visible order.
     pub fn selected_entries(&self) -> Vec<&Entry> {
-        self.entries.iter().filter(|e| self.selection.items.contains(&e.path)).collect()
+        self.entries
+            .iter()
+            .filter(|e| self.selection.items.contains(&e.path))
+            .collect()
     }
     /// Member paths of all selected entries (sequences expanded).
     pub fn selected_member_paths(&self) -> Vec<PathBuf> {
-        self.selected_entries().iter().flat_map(|e| e.member_paths()).collect()
+        self.selected_entries()
+            .iter()
+            .flat_map(|e| e.member_paths())
+            .collect()
     }
     pub fn info(&mut self, text: impl Into<String>) {
-        self.status = Some(Status { kind: StatusKind::Info, text: text.into() });
+        self.status = Some(Status {
+            kind: StatusKind::Info,
+            text: text.into(),
+        });
     }
     pub fn error(&mut self, text: impl Into<String>) {
         let text = text.into();
         log::error!("{text}");
-        self.status = Some(Status { kind: StatusKind::Error, text });
+        self.status = Some(Status {
+            kind: StatusKind::Error,
+            text,
+        });
     }
 }
+
+/// egui drag-and-drop payload for internal drags (file pane → folder tree): member paths.
+#[derive(Clone, Debug)]
+pub struct DragPaths(pub Vec<PathBuf>);

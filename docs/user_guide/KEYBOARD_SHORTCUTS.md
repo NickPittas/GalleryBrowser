@@ -26,3 +26,26 @@
 - `,`: Step backward in video/sequence preview
 - `.`: Step forward in video/sequence preview
 - `Ctrl+Q`: Quit the application
+
+## Other
+
+- `Ctrl+Shift+N`: New folder
+- `Ctrl+Z` / `Ctrl+Y`: Undo / redo file operation
+- `Shift+Delete`: Delete permanently (with confirmation)
+- `Alt+Left` / `Alt+Right`: Back / forward in folder history
+- `Space`: Play / pause the preview
+- `Ctrl+P`: Show / hide the preview pane
+- `F1`: Show the shortcuts list
+- `Arrows`, `Home`, `End`, `PageUp`, `PageDown`: Move focus in the file pane (`Shift` extends the selection)
+- `Enter`: Open folder / open the fullscreen viewer
+
+## Fullscreen viewer
+
+- `Esc`: Close
+- `Left` / `Right` or `PageUp` / `PageDown`: Previous / next item
+- `Space`: Play / pause
+- `,` / `.`: Step one frame backward / forward
+- `F`: Toggle OS fullscreen
+- `0`: Fit to window
+- `1`: Actual size (100%)
+- `+` / `-`: Zoom in / out

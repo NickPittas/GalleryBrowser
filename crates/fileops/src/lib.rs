@@ -2,10 +2,14 @@
 //! silently overwritten: collisions follow [`ConflictPolicy`]. Every finished op reports exactly which
 //! paths moved/were created/removed so the library can relink metadata.
 
+mod fsops;
 pub mod rename;
 pub mod worker;
 
-pub use rename::{RenameItem, RenamePlan, RenameRule, RenameStatus, CaseMode, NumberMode, plan_renames};
+pub use rename::{
+    CaseMode, InsertRemoveMode, NumberMode, NumberOrder, RenameItem, RenamePlan, RenameRule,
+    RenameScope, RenameStatus, plan_renames,
+};
 pub use worker::{FileOpsWorker, OpEvent, OpOutcome};
 
 use std::path::PathBuf;
@@ -22,17 +26,37 @@ pub enum ConflictPolicy {
 #[derive(Clone, Debug)]
 pub enum FileOp {
     /// Each source may be a file or directory (recursive).
-    Copy { sources: Vec<PathBuf>, dest_dir: PathBuf, conflict: ConflictPolicy },
-    Move { sources: Vec<PathBuf>, dest_dir: PathBuf, conflict: ConflictPolicy },
+    Copy {
+        sources: Vec<PathBuf>,
+        dest_dir: PathBuf,
+        conflict: ConflictPolicy,
+    },
+    Move {
+        sources: Vec<PathBuf>,
+        dest_dir: PathBuf,
+        conflict: ConflictPolicy,
+    },
     /// Freedesktop trash (`trash` crate). Undo restores from trash when possible.
-    Trash { paths: Vec<PathBuf> },
+    Trash {
+        paths: Vec<PathBuf>,
+    },
     /// Permanent; not undoable.
-    Delete { paths: Vec<PathBuf> },
+    Delete {
+        paths: Vec<PathBuf>,
+    },
     /// Fails (no overwrite) if `to` exists.
-    Rename { from: PathBuf, to: PathBuf },
+    Rename {
+        from: PathBuf,
+        to: PathBuf,
+    },
     /// Executed collision-safely (two-phase via temp names) so cyclic renames (1→2, 2→3) work.
-    BatchRename { plan: RenamePlan },
-    NewFolder { parent: PathBuf, name: String },
+    BatchRename {
+        plan: RenamePlan,
+    },
+    NewFolder {
+        parent: PathBuf,
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, thiserror::Error)]

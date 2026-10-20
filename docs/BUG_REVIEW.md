@@ -1,5 +1,7 @@
 # GalleryBrowser (Python) bug review
 
+> The Python code described here was removed on the `rust-rewrite` branch; it remains available on `main`.
+
 Static review of the PyQt6 implementation on `main`. Each item: location, severity, defect, trigger, fix. All are addressed by design in the Rust rewrite on branch `rust-rewrite`.
 
 

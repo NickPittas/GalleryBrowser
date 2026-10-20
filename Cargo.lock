@@ -1792,6 +1792,7 @@ dependencies = [
  "filmcraft-frame",
  "filmcraft-media",
  "filmcraft-time",
+ "flate2",
  "gallerybrowser-core",
  "lightcraft-meta",
  "lightcraft-preview",
@@ -1799,6 +1800,7 @@ dependencies = [
  "log",
  "photocraft-codecs",
  "photocraft-psd",
+ "png",
  "rayon",
  "serde",
  "serde_json",
@@ -1814,17 +1816,16 @@ dependencies = [
  "crossbeam-channel",
  "filmcraft-frame",
  "filmcraft-media",
- "filmcraft-time",
  "gallerybrowser-media",
  "log",
  "tempfile",
- "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "gallerybrowser-ui-egui"
 version = "0.2.0"
 dependencies = [
+ "chrono",
  "craft-ui",
  "eframe",
  "egui",

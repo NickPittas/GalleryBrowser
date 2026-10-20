@@ -26,6 +26,8 @@ rayon = { workspace = true }
 crossbeam-channel = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+flate2 = "1"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+png = "0.18"

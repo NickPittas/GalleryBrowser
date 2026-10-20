@@ -1,140 +1,82 @@
 # GalleryBrowser
 
-A Linux-native browser for images, videos, and image sequences with DB-backed tags, collections, ratings, and fast preview workflows.
+A fast, video-first media browser for Linux, written in Rust (egui + wgpu) on the
+[ArtCraft](https://github.com/storytold) stack. No ffmpeg, no GStreamer: all decoding is pure Rust.
 
 ## Features
 
-- **3-Pane Interface**: Tree navigation, file grid/list, and preview/info panel
-- **Metadata Preview**: Image and video technical metadata in the info pane
-- **Advanced Preview**: GStreamer-based playback for all major formats
-- **File Management**: Copy, move, delete, batch rename with tokens
-- **Organization**: Tags, collections, ratings, and folder/library filters
-- **Image Sequences**: Detect and play numbered image sequences
-- **Linux Integration**: Context menus, single instance, Flatpak support
+- **Video-first browsing**: MOV/MP4, MXF, MKV/WebM, AVI, MPEG-TS; ProRes, DNxHD/HR, H.264, HEVC, AV1, VP8/VP9.
+- **Images**: EXR, PSD, TIFF, WebP, DPX, HDR, DNG and common formats (PNG, JPEG, ...).
+- **Image sequences** collapsed into one entry, with gaps detected; operations act on every frame.
+- **Hover scrub** over thumbnails of videos and sequences.
+- **Preview pane and fullscreen player** with decode-ahead playback, audio (cpal), stepping, speed, loop.
+- **Info pane**: file properties, EXIF, ComfyUI workflow/prompt metadata from PNGs.
+- **Tags, collections and 0-5 ratings**, persisted crash-safely.
+- **File operations** on a background worker: copy, move, trash, permanent delete, rename, batch rename; never overwrites; undo/redo.
+- **Single instance**: `gallerybrowser PATH` forwards the path to the running window.
 
-## Supported Formats
+Keyboard shortcuts: [docs/user_guide/KEYBOARD_SHORTCUTS.md](docs/user_guide/KEYBOARD_SHORTCUTS.md).
 
-**Images**: PNG, JPG, TIFF, BMP, GIF, WEBP, EXR, TGA, PSD
-**Videos**: MP4, MOV, AVI, MKV, MXF, ProRes, H.264, H.265, AV1
+## Requirements
 
-## Installation
+- Rust >= 1.95 (edition 2024)
+- A Vulkan-capable GPU driver (wgpu)
+- ALSA or PipeWire (PulseAudio-compatible) for audio
+- No ffmpeg or GStreamer needed
 
-### Flatpak (Recommended)
+## Build and run
 
-```bash
-flatpak install flathub com.nickpittas.gallerybrowser
-flatpak run com.nickpittas.gallerybrowser
+```sh
+cargo run --release -p gallerybrowser -- [PATH...]
 ```
 
-### From Source
+## Tests
 
-```bash
-git clone https://github.com/NickPittas/GalleryBrowser.git
-cd GalleryBrowser
-
-./setup_local_env.sh
-./run_local_app.sh
+```sh
+cargo test --workspace
 ```
 
-`setup_local_env.sh` creates a repo-local `.venv`, installs runtime and dev dependencies there, and keeps runtime state inside `.local_state`. It uses `--system-site-packages` so the local venv can see Linux system packages such as `PyGObject` / GStreamer bindings without installing into system Python.
+## Flatpak
 
-## Development
+App id: `io.github.nickpittas.GalleryBrowser`. The manifest builds offline, so the vendored crate list
+must be generated from `Cargo.lock` first (re-run whenever `Cargo.lock` changes), using
+`flatpak-cargo-generator.py` from [flatpak-builder-tools](https://github.com/flatpak/flatpak-builder-tools) (`cargo/`):
 
-### Local Setup
-
-```bash
-./setup_local_env.sh
+```sh
+python3 flatpak-cargo-generator.py Cargo.lock -o flatpak/cargo-sources.json
+flatpak-builder --user --install --force-clean flatpak/build-dir \
+    flatpak/io.github.nickpittas.GalleryBrowser.yml
+flatpak run io.github.nickpittas.GalleryBrowser
 ```
 
-### Run the App
+The manifest uses the freedesktop 25.08 runtime with the `rust-stable` SDK extension.
 
-```bash
-./run_local_app.sh
-```
+## Data locations
 
-### Run Tests
+| Data | Path |
+| --- | --- |
+| Settings | `~/.config/gallerybrowser/settings.json` |
+| Library (tags, collections, ratings) | `~/.local/share/gallerybrowser/library` |
+| Thumbnail cache | `~/.cache/gallerybrowser/thumbnails` |
 
-```bash
-./run_local_tests.sh
-```
-
-By default, `run_local_tests.sh` runs:
-
-```bash
-tests/test_basic.py -q
-```
-
-You can pass your own pytest arguments too:
-
-```bash
-./run_local_tests.sh tests/test_thumbnails.py -q
-./run_local_tests.sh tests -q
-```
-
-The local test runner exports `QT_QPA_PLATFORM=offscreen` and the same repo-local XDG paths as the app, which is the most reliable way to run UI tests in a headless environment.
-
-### Formatting
-
-```bash
-./.venv/bin/black src/ tests/
-./.venv/bin/ruff check src/ tests/
-```
-
-## Usage
-
-### Basic Navigation
-
-- **Open Folder**: `Ctrl+O` or File → Open Folder
-- **Navigate**: Click folders in left tree pane
-- **View Files**: Grid or List view in center pane
-- **Preview**: Select file to see preview in right pane
-- **Filter Scope**: Switch between `Folder` and `Library` in the toolbar
-- **Organize**: Use tags, collections, and rating filters from the left panel and toolbar
-
-### File Operations
-
-- **Copy**: `Ctrl+C`
-- **Cut**: `Ctrl+X`
-- **Paste**: `Ctrl+V`
-- **Delete**: `Del` (moves to trash)
-- **Rename**: `F2`
-- **Batch Rename**: Select multiple files, right-click → Batch Rename
-
-### ComfyUI Metadata
-
-ComfyUI-specific metadata parsing is still a follow-up item. Current builds focus on
-filesystem browsing, video/image/sequence preview, and DB-backed organization features.
-
-## Current v1 Scope
-
-Shipped now:
-
-- Open-folder flow from the menu and shortcut
-- Persistent settings, favorites, and recents
-- DB-backed tags, collections, and ratings
-- Folder-scoped and library-scoped filtering
-- Video metadata in the info pane, loaded asynchronously
-- Local-only setup scripts for app launch and headless tests
-
-Still follow-up work:
-
-- richer ComfyUI metadata display
-- broader UI/integration test coverage beyond the current regression suite
-- docs/design cleanup in `docs/DESIGN.md`, which still describes planned architecture in a few places
-- format conversion and other advanced roadmap features
-
-### Keyboard Shortcuts
-
-See `docs/user_guide/KEYBOARD_SHORTCUTS.md`
+If a database from the old Python version exists, its tags, collections and ratings are imported once, read-only,
+into the library. The Python app's `settings.json` keys are accepted unchanged.
 
 ## Architecture
 
-See `docs/DESIGN.md` for the broader design direction. Some sections there are still aspirational and describe planned components rather than the exact current implementation.
+| Layer | Crate | Role |
+| --- | --- | --- |
+| L0 | `gallerybrowser-core` | Entries, classification, scanning, sequences, settings, XDG dirs (UI-free) |
+| L1 | `gallerybrowser-fileops` | Background copy/move/trash/delete/rename, batch rename, undo |
+| L1 | `gallerybrowser-media` | Video/still/PSD decoding, EXIF, thumbnails, ComfyUI metadata |
+| L2 | `gallerybrowser-library` | Tags/collections/ratings on the lightcraft-catalog journal, legacy import |
+| L3 | `gallerybrowser-player` | Decode-ahead playback engine, cpal audio clock |
+| L5 | `gallerybrowser-ui-egui` | egui frontend |
+| app | `apps/gallerybrowser` | Binary, single-instance handling |
 
-## License
+Details: [docs/DESIGN.md](docs/DESIGN.md).
 
-MIT License - See LICENSE file for details.
+## Credits
 
-## Acknowledgments
-
-Inspired by KAssetManager for Windows.
+Built on ArtCraft's FilmCraft, LightCraft and PhotoCraft crates (MIT OR Apache-2.0); see [NOTICE](NOTICE).
+Known defects of the former Python implementation, all addressed by the rewrite: [docs/BUG_REVIEW.md](docs/BUG_REVIEW.md).
