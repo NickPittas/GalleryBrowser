@@ -17,5 +17,8 @@ eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "
 log = { workspace = true }
 env_logger = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+interprocess = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }

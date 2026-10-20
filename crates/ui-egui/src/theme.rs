@@ -120,6 +120,8 @@ pub enum Icon {
     Up,
     Refresh,
     Close,
+    Copy,
+    Edit,
 }
 
 /// Icon edge length in points.
@@ -261,6 +263,31 @@ fn paint_icon(painter: &egui::Painter, icon: Icon, c: Pos2, size: f32, stroke: S
             let d = h * 0.5;
             painter.line_segment([pos2(c.x - d, c.y - d), pos2(c.x + d, c.y + d)], stroke);
             painter.line_segment([pos2(c.x - d, c.y + d), pos2(c.x + d, c.y - d)], stroke);
+        }
+        Icon::Copy => {
+            let (w, hh) = (h * 0.8, h * 0.95);
+            let front =
+                egui::Rect::from_center_size(pos2(c.x - h * 0.15, c.y + h * 0.15), vec2(w, hh));
+            let (bx, by) = (c.x + h * 0.3, c.y - h * 0.3);
+            painter.add(Shape::line(
+                vec![
+                    pos2(bx - w * 0.5 + h * 0.3, by - hh * 0.5),
+                    pos2(bx + w * 0.5, by - hh * 0.5),
+                    pos2(bx + w * 0.5, by + hh * 0.5 - h * 0.3),
+                ],
+                stroke,
+            ));
+            painter.rect_stroke(front, 1.0, stroke, StrokeKind::Middle);
+        }
+        Icon::Edit => {
+            let d = h * 0.7;
+            let tip = pos2(c.x - d, c.y + d);
+            let top = pos2(c.x + d * 0.85, c.y - d * 0.85);
+            let side = vec2(d * 0.3, d * 0.3);
+            painter.line_segment([tip, top - side], stroke);
+            painter.line_segment([tip, top + side], stroke);
+            painter.line_segment([top - side, top + side], stroke);
+            painter.line_segment([tip + vec2(d * 0.5, 0.0), tip + vec2(d * 1.6, 0.0)], stroke);
         }
     }
 }

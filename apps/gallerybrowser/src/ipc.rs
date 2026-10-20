@@ -1,14 +1,22 @@
-//! Single-instance IPC over a unix socket. Framing: one connection carries one message, the
-//! newline-separated absolute paths (raw OS bytes), terminated by EOF. The receiver treats the bytes
-//! as hostile: size-capped, relative or empty entries dropped, read timeout.
+//! Single-instance IPC over a local socket (unix domain socket at the given path; a named pipe derived
+//! from that path on Windows). Framing: one connection carries one message, the newline-separated
+//! absolute paths (raw OS bytes on unix, UTF-8 on Windows), terminated by EOF. The receiver treats the
+//! bytes as hostile: size-capped, relative or empty entries dropped, read timeout.
 
-use std::ffi::OsStr;
-use std::io::{self, Read, Write};
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::borrow::Cow;
+use std::io::{self, Read};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+#[cfg(unix)]
+mod unix;
+#[cfg(unix)]
+use unix as sys;
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as sys;
 
 /// Largest message accepted from a peer.
 const MAX_MESSAGE_BYTES: u64 = 1024 * 1024;
@@ -16,16 +24,45 @@ const MAX_MESSAGE_BYTES: u64 = 1024 * 1024;
 const MAX_PATHS: usize = 10_000;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// The platform's accepting end of the instance socket.
+pub type Listener = sys::Listener;
+
+/// A path as wire bytes: the raw OS bytes on unix, UTF-8 (lossy) elsewhere.
+#[cfg(unix)]
+fn path_bytes(p: &Path) -> Cow<'_, [u8]> {
+    use std::os::unix::ffi::OsStrExt;
+    Cow::Borrowed(p.as_os_str().as_bytes())
+}
+
+#[cfg(not(unix))]
+fn path_bytes(p: &Path) -> Cow<'_, [u8]> {
+    match p.to_string_lossy() {
+        Cow::Borrowed(s) => Cow::Borrowed(s.as_bytes()),
+        Cow::Owned(s) => Cow::Owned(s.into_bytes()),
+    }
+}
+
+#[cfg(unix)]
+fn bytes_path(b: &[u8]) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    PathBuf::from(std::ffi::OsStr::from_bytes(b))
+}
+
+#[cfg(not(unix))]
+fn bytes_path(b: &[u8]) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(b).into_owned())
+}
+
 /// Encodes absolute paths as the wire message. Paths that are not absolute or that contain a newline
 /// (not representable in this framing) are skipped.
 pub fn encode_paths(paths: &[PathBuf]) -> Vec<u8> {
     let mut out = Vec::new();
     for p in paths {
-        let bytes = p.as_os_str().as_bytes();
+        let bytes = path_bytes(p);
         if !p.is_absolute() || bytes.contains(&b'\n') {
             continue;
         }
-        out.extend_from_slice(bytes);
+        out.extend_from_slice(&bytes);
         out.push(b'\n');
     }
     out
@@ -37,7 +74,7 @@ pub fn decode_paths(bytes: &[u8]) -> Vec<PathBuf> {
     bytes
         .split(|&b| b == b'\n')
         .filter(|line| !line.is_empty())
-        .map(|line| PathBuf::from(OsStr::from_bytes(line)))
+        .map(bytes_path)
         .filter(|p| p.is_absolute())
         .take(MAX_PATHS)
         .collect()
@@ -46,11 +83,7 @@ pub fn decode_paths(bytes: &[u8]) -> Vec<PathBuf> {
 /// Sends `paths` to a running instance listening on `socket`.
 /// `Err` means nobody is (validly) listening there.
 pub fn send_paths(socket: &Path, paths: &[PathBuf]) -> io::Result<()> {
-    let mut stream = UnixStream::connect(socket)?;
-    stream.set_write_timeout(Some(IO_TIMEOUT))?;
-    stream.write_all(&encode_paths(paths))?;
-    stream.flush()?;
-    stream.shutdown(std::net::Shutdown::Write)
+    sys::send(socket, &encode_paths(paths))
 }
 
 /// Result of claiming the instance socket.
@@ -58,7 +91,7 @@ pub enum Claim {
     /// Another instance is running and accepted the paths; this process should exit.
     Forwarded,
     /// This process owns the socket.
-    Primary(UnixListener),
+    Primary(Listener),
     /// The socket could not be claimed; run without single-instance support.
     Unavailable(io::Error),
 }
@@ -68,83 +101,51 @@ pub fn claim(socket: &Path, paths: &[PathBuf]) -> Claim {
     if send_paths(socket, paths).is_ok() {
         return Claim::Forwarded;
     }
-    if let Some(dir) = socket.parent()
-        && let Err(e) = std::fs::create_dir_all(dir)
-    {
-        return Claim::Unavailable(e);
-    }
-    // Nobody answered: any file at the path is a stale leftover from a crashed instance.
-    match std::fs::remove_file(socket) {
-        Ok(()) => log::info!("removed stale instance socket {}", socket.display()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Claim::Unavailable(e),
-    }
-    match UnixListener::bind(socket) {
+    match sys::bind(socket) {
         Ok(l) => Claim::Primary(l),
         Err(e) => Claim::Unavailable(e),
     }
 }
 
-/// Reads one message from `stream` (bounded in size and time) and decodes it.
-fn read_message(mut stream: UnixStream) -> io::Result<Vec<PathBuf>> {
-    stream.set_read_timeout(Some(IO_TIMEOUT))?;
+/// Reads one message from `stream` to EOF, bounded in size (the caller bounds the time).
+fn read_bytes<R: Read>(stream: R) -> io::Result<Vec<u8>> {
     let mut buf = Vec::new();
-    (&mut stream)
-        .take(MAX_MESSAGE_BYTES + 1)
-        .read_to_end(&mut buf)?;
+    stream.take(MAX_MESSAGE_BYTES + 1).read_to_end(&mut buf)?;
     if buf.len() as u64 > MAX_MESSAGE_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "instance message too large",
         ));
     }
-    Ok(decode_paths(&buf))
+    Ok(buf)
 }
 
 /// Accept loop: for each connection calls `on_message(paths)` (even when empty, so a bare second
-/// launch can still raise the window). Runs until the process exits; each connection is handled
+/// launch can still raise the window). Runs until the process exits; each message is handled
 /// under `catch_unwind` so a bad peer or callback never kills the listener.
-pub fn serve<F>(listener: UnixListener, on_message: F)
+pub fn serve<F>(listener: Listener, on_message: F)
 where
     F: Fn(Vec<PathBuf>),
 {
-    for conn in listener.incoming() {
-        match conn {
-            Ok(stream) => {
-                let handled = catch_unwind(AssertUnwindSafe(|| match read_message(stream) {
-                    Ok(paths) => on_message(paths),
-                    Err(e) => log::warn!("instance message rejected: {e}"),
-                }));
-                if handled.is_err() {
-                    log::error!("instance message handler panicked; continuing");
-                }
-            }
-            Err(e) => {
-                log::warn!("instance socket accept failed: {e}");
-                std::thread::sleep(Duration::from_millis(100));
-            }
+    sys::serve(listener, |message| {
+        let handled = catch_unwind(AssertUnwindSafe(|| match message {
+            Ok(bytes) => on_message(decode_paths(&bytes)),
+            Err(e) => log::warn!("instance message rejected: {e}"),
+        }));
+        if handled.is_err() {
+            log::error!("instance message handler panicked; continuing");
         }
-    }
+    });
 }
 
-/// Removes the socket file when dropped (normal exit, early return, unwinding).
+/// Releases the instance socket when dropped (normal exit, early return, unwinding): removes the
+/// socket file on unix; a Windows named pipe vanishes with its listener, so there is nothing to do.
 pub struct SocketGuard(pub PathBuf);
 
 impl Drop for SocketGuard {
     fn drop(&mut self) {
-        match std::fs::remove_file(&self.0) {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            Err(e) => log::warn!("could not remove instance socket {}: {e}", self.0.display()),
-        }
+        sys::cleanup(&self.0);
     }
-}
-
-/// Raw bytes → `PathBuf` helper for tests and callers holding non-UTF-8 names.
-#[cfg(test)]
-fn path_from_bytes(b: &[u8]) -> PathBuf {
-    use std::os::unix::ffi::OsStringExt;
-    PathBuf::from(std::ffi::OsString::from_vec(b.to_vec()))
 }
 
 #[cfg(test)]
@@ -152,13 +153,31 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
 
+    /// An absolute path for the current platform from a unix-style spelling.
+    fn abs(p: &str) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(format!("C:{}", p.replace('/', "\\")))
+        } else {
+            PathBuf::from(p)
+        }
+    }
+
+    fn line(p: &Path) -> String {
+        format!("{}\n", p.display())
+    }
+
     #[test]
-    fn encode_decode_round_trip_including_non_utf8() {
-        let paths = vec![
-            PathBuf::from("/a/b c/shot_####.exr"),
-            path_from_bytes(b"/odd/\xff\xfe.mov"),
-            PathBuf::from("/x"),
-        ];
+    fn encode_decode_round_trip() {
+        let paths = vec![abs("/a/b c/shot_####.exr"), abs("/ünï/clip.mov"), abs("/x")];
+        assert_eq!(decode_paths(&encode_paths(&paths)), paths);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_paths_round_trip_on_unix() {
+        use std::os::unix::ffi::OsStringExt;
+        let odd = PathBuf::from(std::ffi::OsString::from_vec(b"/odd/\xff\xfe.mov".to_vec()));
+        let paths = vec![PathBuf::from("/a"), odd, PathBuf::from("/x")];
         assert_eq!(decode_paths(&encode_paths(&paths)), paths);
     }
 
@@ -166,16 +185,17 @@ mod tests {
     fn encode_skips_relative_and_newline_paths() {
         let paths = vec![
             PathBuf::from("rel/x.mov"),
-            PathBuf::from("/has\nnewline.mov"),
-            PathBuf::from("/ok.mov"),
+            abs("/has\nnewline.mov"),
+            abs("/ok.mov"),
         ];
-        assert_eq!(encode_paths(&paths), b"/ok.mov\n");
+        assert_eq!(encode_paths(&paths), line(&abs("/ok.mov")).into_bytes());
     }
 
     #[test]
     fn decode_drops_empty_and_relative_lines() {
-        let got = decode_paths(b"\n/a\n\nrel\n../up\n/b");
-        assert_eq!(got, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+        let (a, b) = (abs("/a"), abs("/b"));
+        let msg = format!("\n{}\nrel\n../up\n{}", line(&a), b.display());
+        assert_eq!(decode_paths(msg.as_bytes()), vec![a, b]);
         assert!(decode_paths(b"").is_empty());
     }
 
@@ -183,9 +203,20 @@ mod tests {
     fn decode_caps_path_count() {
         let mut msg = Vec::new();
         for i in 0..(MAX_PATHS + 50) {
-            msg.extend_from_slice(format!("/p{i}\n").as_bytes());
+            msg.extend_from_slice(line(&abs(&format!("/p{i}"))).as_bytes());
         }
         assert_eq!(decode_paths(&msg).len(), MAX_PATHS);
+    }
+
+    #[test]
+    fn oversized_message_is_rejected() {
+        let big = vec![b'/'; MAX_MESSAGE_BYTES as usize + 1];
+        assert!(read_bytes(big.as_slice()).is_err());
+        let ok = vec![b'/'; MAX_MESSAGE_BYTES as usize];
+        assert_eq!(
+            read_bytes(ok.as_slice()).map(|b| b.len()).ok(),
+            Some(ok.len())
+        );
     }
 
     #[test]
@@ -196,6 +227,7 @@ mod tests {
         let Claim::Primary(listener) = claim(&sock, &[]) else {
             panic!("first claim must bind");
         };
+        let _guard = SocketGuard(sock.clone());
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             serve(listener, move |paths| {
@@ -203,65 +235,12 @@ mod tests {
             });
         });
 
-        let sent = vec![
-            PathBuf::from("/media/clip.mov"),
-            PathBuf::from("/media/seq_####.exr"),
-        ];
+        let sent = vec![abs("/media/clip.mov"), abs("/media/seq_####.exr")];
         assert!(matches!(claim(&sock, &sent), Claim::Forwarded));
         assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), sent);
 
         // A bare launch still produces a (empty) message.
         assert!(matches!(claim(&sock, &[]), Claim::Forwarded));
         assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_empty());
-    }
-
-    #[test]
-    fn stale_socket_file_is_replaced() {
-        let dir = tempfile::tempdir().unwrap();
-        let sock = dir.path().join("instance.sock");
-        // Bind and drop the listener without removing the file: a crashed instance's leftover.
-        drop(UnixListener::bind(&sock).unwrap());
-        assert!(sock.exists());
-        assert!(matches!(claim(&sock, &[]), Claim::Primary(_)));
-    }
-
-    #[test]
-    fn regular_file_at_socket_path_is_replaced() {
-        let dir = tempfile::tempdir().unwrap();
-        let sock = dir.path().join("instance.sock");
-        std::fs::write(&sock, b"junk").unwrap();
-        assert!(matches!(claim(&sock, &[]), Claim::Primary(_)));
-    }
-
-    #[test]
-    fn oversized_message_is_rejected() {
-        let dir = tempfile::tempdir().unwrap();
-        let sock = dir.path().join("instance.sock");
-        let listener = UnixListener::bind(&sock).unwrap();
-        let writer = std::thread::spawn(move || {
-            let mut s = UnixStream::connect(&sock).unwrap();
-            let chunk = vec![b'/'; 64 * 1024];
-            // The receiver stops reading at the cap; a broken pipe on the tail is expected.
-            for _ in 0..(MAX_MESSAGE_BYTES as usize / chunk.len() + 4) {
-                if s.write_all(&chunk).is_err() {
-                    break;
-                }
-            }
-        });
-        let (stream, _) = listener.accept().unwrap();
-        assert!(read_message(stream).is_err());
-        let _ = writer.join();
-    }
-
-    #[test]
-    fn guard_removes_socket() {
-        let dir = tempfile::tempdir().unwrap();
-        let sock = dir.path().join("instance.sock");
-        let l = UnixListener::bind(&sock).unwrap();
-        {
-            let _g = SocketGuard(sock.clone());
-        }
-        assert!(!sock.exists());
-        drop(l);
     }
 }

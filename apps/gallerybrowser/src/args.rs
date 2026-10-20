@@ -88,7 +88,8 @@ fn absolutize(path: &Path, cwd: &Path) -> PathBuf {
     }
 }
 
-#[cfg(test)]
+// The fixtures spell absolute paths unix-style, which are not absolute on Windows.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish artifacts for (e.g. v0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  GH_REPO: ${{ github.repository }}
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    name: ensure release exists
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release if missing
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "release $RELEASE_TAG already exists"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag \
+              --title "GalleryBrowser ${RELEASE_TAG#v}" \
+              --generate-notes
+          fi
+
+  macos:
+    name: macOS universal dmg
+    needs: release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-macos
+
+      - name: Build aarch64 + x86_64
+        run: |
+          cargo build --release --locked -p gallerybrowser --target aarch64-apple-darwin
+          cargo build --release --locked -p gallerybrowser --target x86_64-apple-darwin
+
+      - name: Install rsvg-convert
+        run: brew install librsvg
+
+      - name: Assemble app bundle and dmg
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          packaging/macos/make-dmg.sh "$VERSION" \
+            target/aarch64-apple-darwin/release/gallerybrowser \
+            target/x86_64-apple-darwin/release/gallerybrowser \
+            dist
+
+      - name: Upload to release
+        run: gh release upload "$RELEASE_TAG" dist/*.dmg --clobber
+
+  windows:
+    name: Windows x64 zip + installer
+    needs: release
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-windows
+
+      - name: Build
+        run: cargo build --release --locked -p gallerybrowser --target x86_64-pc-windows-msvc
+
+      - name: Stage files
+        run: |
+          $stage = "dist/GalleryBrowser"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/gallerybrowser.exe $stage
+          Copy-Item packaging/windows/gallerybrowser.ico $stage
+          Copy-Item NOTICE, README.md $stage
+          if (Test-Path LICENSE) { Copy-Item LICENSE $stage }
+
+      - name: Portable zip
+        run: |
+          $version = $env:RELEASE_TAG.TrimStart('v')
+          Compress-Archive -Path dist/GalleryBrowser -DestinationPath "dist/GalleryBrowser-$version-windows-x64.zip" -Force
+
+      - name: Installer (Inno Setup)
+        run: |
+          $version = $env:RELEASE_TAG.TrimStart('v')
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          & $iscc "/DAppVersion=$version" "/DSourceDir=$PWD\dist\GalleryBrowser" "/DOutputDir=$PWD\dist" packaging/windows/installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+
+      - name: Upload to release
+        run: gh release upload $env:RELEASE_TAG (Get-ChildItem dist/*.zip, dist/*-setup.exe).FullName --clobber

@@ -21,7 +21,8 @@ flatpak/.flatpak-builder/
 flatpak/build-dir/
 flatpak/repo/
 flatpak/*.flatpak
-flatpak/cargo-sources.json
+*.flatpak
+.flatpak-builder/
 
 # OS
 .DS_Store

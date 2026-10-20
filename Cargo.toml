@@ -52,6 +52,8 @@ eframe = { version = "0.36", default-features = false }
 rfd = "0.17"
 cpal = "0.16"
 open = "5"
+# single-instance IPC (named pipes on Windows); 0BSD OR Apache-2.0
+interprocess = "2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -39,10 +39,23 @@ impl Default for ScanOptions {
     }
 }
 
-/// Hidden = the file name starts with a dot.
+/// Hidden = the file name starts with a dot; on Windows also the `FILE_ATTRIBUTE_HIDDEN` flag.
 pub fn is_hidden(path: &Path) -> bool {
     path.file_name()
         .is_some_and(|n| n.as_encoded_bytes().first() == Some(&b'.'))
+        || has_hidden_attribute(path)
+}
+
+#[cfg(windows)]
+fn has_hidden_attribute(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0)
+}
+
+#[cfg(not(windows))]
+fn has_hidden_attribute(_path: &Path) -> bool {
+    false
 }
 
 /// Media entries directly inside `dir` (non-recursive, no directories). Unreadable single files are skipped

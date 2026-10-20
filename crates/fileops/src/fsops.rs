@@ -83,6 +83,24 @@ pub(crate) fn claim_dest(
     Err(FsError::Io(io::Error::other("no free file name found")))
 }
 
+/// Creates `dst` as a symlink to `target`, the link read from `src`.
+#[cfg(unix)]
+fn symlink(_src: &Path, target: &Path, dst: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(target, dst)
+}
+
+/// Creates `dst` as a symlink to `target`, the link read from `src`. Windows distinguishes file and
+/// directory links, so the kind is taken from what `src` resolves to (creating one needs the
+/// symlink privilege or developer mode; without it this is a plain error).
+#[cfg(windows)]
+fn symlink(src: &Path, target: &Path, dst: &Path) -> io::Result<()> {
+    if fs::metadata(src).is_ok_and(|m| m.is_dir()) {
+        std::os::windows::fs::symlink_dir(target, dst)
+    } else {
+        std::os::windows::fs::symlink_file(target, dst)
+    }
+}
+
 /// Copy a file, directory tree or symlink to `dst` (which must not exist). On failure everything this
 /// call created is removed again.
 pub(crate) fn copy_node(src: &Path, dst: &Path) -> Result<(), FsError> {
@@ -97,7 +115,7 @@ fn copy_depth(src: &Path, dst: &Path, depth: usize) -> Result<(), FsError> {
     let ft = meta.file_type();
     if ft.is_symlink() {
         let target = fs::read_link(src)?;
-        return std::os::unix::fs::symlink(target, dst).map_err(map_exists);
+        return symlink(src, &target, dst).map_err(map_exists);
     }
     if ft.is_dir() {
         fs::create_dir(dst).map_err(map_exists)?;

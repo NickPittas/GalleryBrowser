@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -337,11 +336,13 @@ fn run_op(ctx: &Ctx<'_>, op: FileOp) -> (String, Effect, Option<Entry>) {
         FileOp::Trash { paths } => {
             let label = items_label("Trash", &paths);
             let effect = trash_paths(ctx, &paths);
-            let entry = (!effect.removed.is_empty()).then(|| Entry {
-                label: label.clone(),
-                undo: Action::Restore(effect.removed.clone()),
-                redo: Action::Trash(effect.removed.clone()),
-            });
+            // The `trash` crate cannot restore on macOS, so there trashing is not undoable.
+            let entry =
+                (cfg!(not(target_os = "macos")) && !effect.removed.is_empty()).then(|| Entry {
+                    label: label.clone(),
+                    undo: Action::Restore(effect.removed.clone()),
+                    redo: Action::Trash(effect.removed.clone()),
+                });
             (label, effect, entry)
         }
         FileOp::Delete { paths } => {
@@ -609,7 +610,9 @@ fn run_action(ctx: &Ctx<'_>, action: &Action, tag: u64) -> Effect {
     effect
 }
 
-/// Restore the newest trashed item whose original path equals each path (freedesktop trash).
+/// Restore the newest trashed item whose original path equals each path (freedesktop / Windows
+/// Recycle Bin).
+#[cfg(not(target_os = "macos"))]
 fn restore_from_trash(effect: &mut Effect, paths: &[PathBuf]) {
     let items = match trash::os_limited::list() {
         Ok(items) => items,
@@ -618,7 +621,7 @@ fn restore_from_trash(effect: &mut Effect, paths: &[PathBuf]) {
             return;
         }
     };
-    let mut used: HashSet<std::ffi::OsString> = HashSet::new();
+    let mut used: std::collections::HashSet<std::ffi::OsString> = Default::default();
     for p in paths {
         if fsops::exists_nofollow(p) {
             effect.err(p, "cannot restore: a file with this name exists");
@@ -637,6 +640,18 @@ fn restore_from_trash(effect: &mut Effect, paths: &[PathBuf]) {
             Ok(()) => effect.created.push(p.clone()),
             Err(e) => effect.err(p, format!("cannot restore from trash: {e}")),
         }
+    }
+}
+
+/// The `trash` crate cannot list or restore items on macOS (Finder owns the Trash), so no undo entry is
+/// recorded for trashing there; this only runs if a `Restore` is queued anyway.
+#[cfg(target_os = "macos")]
+fn restore_from_trash(effect: &mut Effect, paths: &[PathBuf]) {
+    for p in paths {
+        effect.err(
+            p,
+            "restoring from the Trash is not supported on macOS; use Finder's Put Back",
+        );
     }
 }
 

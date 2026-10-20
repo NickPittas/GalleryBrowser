@@ -3,6 +3,7 @@
 ## Navigation
 
 - `Ctrl+O`: Open folder
+- `Ctrl+L`: Edit the active pane's path in the breadcrumb (Enter navigates, Esc cancels)
 - `Backspace`: Go to parent folder from the file pane
 - `F5`: Refresh current view
 - `Esc`: Clear file selection

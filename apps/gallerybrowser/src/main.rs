@@ -1,6 +1,8 @@
 //! Entry point: logging, panic hook, CLI (`gallerybrowser [PATH...]`), single instance
-//! (unix socket at AppDirs::instance_socket: a second launch forwards its paths and exits 0),
+//! (local socket at AppDirs::instance_socket, see `ipc`: a second launch forwards its paths and exits 0),
 //! eframe window (title "GalleryBrowser", min 1200x800, app_id io.github.nickpittas.GalleryBrowser).
+// Release builds on Windows are GUI-subsystem executables (no console window).
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod args;
 mod crash;
@@ -24,7 +26,8 @@ fn main() -> ExitCode {
     .init();
     crash::install();
 
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+    let cwd = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from(std::path::MAIN_SEPARATOR_STR));
     let paths = match args::parse(std::env::args_os().skip(1), &cwd) {
         Ok(args::Cli::Help) => {
             print!("{}", args::HELP);

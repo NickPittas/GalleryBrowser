@@ -164,21 +164,8 @@ pub fn dispatch(state: &mut AppState, ctx: &egui::Context, action: Action) {
             None => state.info("Nothing to redo"),
         },
         Action::RevealInFileManager(p) => {
-            let dir = if p.is_dir() {
-                Some(p.as_path())
-            } else {
-                p.parent()
-            };
-            match dir {
-                Some(d) => {
-                    if let Err(e) = open::that_detached(d) {
-                        state.error(format!(
-                            "Could not open file manager for {}: {e}",
-                            d.display()
-                        ));
-                    }
-                }
-                None => state.error(format!("No containing folder for {}", p.display())),
+            if let Err(msg) = reveal_in_file_manager(&p) {
+                state.error(msg);
             }
         }
         Action::OpenWithDefaultApp(p) => {
@@ -342,6 +329,48 @@ pub fn dispatch(state: &mut AppState, ctx: &egui::Context, action: Action) {
         Action::OpenPaths(paths) => open_paths(state, ctx, paths),
     }
     sync_focus(state);
+}
+
+/// Shows `p` in the platform file manager. Linux opens the folder (`p` itself, or the containing
+/// folder of a file) with the default handler; macOS and Windows select the item in Finder/Explorer.
+#[cfg(not(any(target_os = "macos", windows)))]
+fn reveal_in_file_manager(p: &Path) -> Result<(), String> {
+    let dir = if p.is_dir() { Some(p) } else { p.parent() };
+    match dir {
+        Some(d) => open::that_detached(d)
+            .map_err(|e| format!("Could not open file manager for {}: {e}", d.display())),
+        None => Err(format!("No containing folder for {}", p.display())),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn reveal_in_file_manager(p: &Path) -> Result<(), String> {
+    let status = std::process::Command::new("open")
+        .arg("-R")
+        .arg(p)
+        .status()
+        .map_err(|e| format!("Could not open Finder for {}: {e}", p.display()))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Could not reveal {} in Finder ({status})",
+            p.display()
+        ))
+    }
+}
+
+#[cfg(windows)]
+fn reveal_in_file_manager(p: &Path) -> Result<(), String> {
+    // Explorer reports failure with a non-zero exit code even when it succeeded, so only the spawn is
+    // checked. The whole `/select,<path>` is one argument, as Explorer expects.
+    let mut arg = std::ffi::OsString::from("/select,");
+    arg.push(p);
+    std::process::Command::new("explorer")
+        .arg(arg)
+        .spawn()
+        .map(drop)
+        .map_err(|e| format!("Could not open Explorer for {}: {e}", p.display()))
 }
 
 // ======================================================================================

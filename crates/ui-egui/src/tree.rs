@@ -12,7 +12,7 @@ const INDENT: f32 = 18.0;
 const MAX_DEPTH: usize = 96;
 
 /// Folder tree (lazy: children listed on expand via core::list_subfolders, cached; respects show_hidden),
-/// roots: Favorites, Recent, Computer (`/`), Home, mounted media (/mnt, /media, /run/media/$USER);
+/// roots: Favorites, Recent, then the platform's filesystem roots (see [`fs_roots`]);
 /// auto-expands to nav.current. Accepts drops (Action::Drop). Context menu: add/remove favorite,
 /// open in file manager, new folder.
 #[derive(Default)]
@@ -21,7 +21,7 @@ pub struct TreeState {
     /// Lazily listed children, dropped whenever `AppState::tree_generation` changes.
     children: HashMap<PathBuf, Vec<PathBuf>>,
     exists: HashMap<PathBuf, bool>,
-    mounts: Vec<PathBuf>,
+    roots: Vec<FsRoot>,
     generation: Option<u64>,
     last_nav: Option<PathBuf>,
     scroll_to_current: bool,
@@ -52,7 +52,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, tree: &mut TreeState) {
         tree.generation = Some(state.tree_generation);
         tree.children.clear();
         tree.exists.clear();
-        tree.mounts = mount_roots();
+        tree.roots = fs_roots();
     }
     if tree.last_nav != state.pane().nav.current {
         tree.last_nav = state.pane().nav.current.clone();
@@ -133,20 +133,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, tree: &mut TreeState) {
             });
             ui.separator();
             ui.push_id("fs_roots", |ui| {
-                node(
-                    ui,
-                    &mut f,
-                    Path::new("/"),
-                    Some("Computer"),
-                    0,
-                    Section::Filesystem,
-                );
-                if let Some(home) = home_dir() {
-                    node(ui, &mut f, &home, Some("Home"), 0, Section::Filesystem);
-                }
-                let mounts = f.tree.mounts.clone();
-                for m in mounts {
-                    node(ui, &mut f, &m, None, 0, Section::Filesystem);
+                let roots = f.tree.roots.clone();
+                for (label, root) in roots {
+                    node(ui, &mut f, &root, label, 0, Section::Filesystem);
                 }
             });
         });
@@ -377,13 +366,29 @@ fn node(
     }
 }
 
+/// A top-level filesystem root: optional fixed label (otherwise the folder name) and its path.
+type FsRoot = (Option<&'static str>, PathBuf);
+
+/// Roots listed under the Favorites/Recent sections, in display order. Linux: `/`, Home, mounted media.
+/// macOS: `/`, Home, `/Volumes/*`. Windows: Home, then every existing drive letter (no `/` root).
+fn fs_roots() -> Vec<FsRoot> {
+    let mut roots: Vec<FsRoot> = Vec::new();
+    #[cfg(not(windows))]
+    roots.push((Some("Computer"), PathBuf::from("/")));
+    roots.extend(home_dir().map(|h| (Some("Home"), h)));
+    roots.extend(mount_roots().into_iter().map(|m| (None, m)));
+    roots
+}
+
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(var)
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
 }
 
 /// Mounted media: non-hidden directories directly beneath /mnt, /media and /run/media/$USER.
+#[cfg(all(unix, not(target_os = "macos")))]
 fn mount_roots() -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     let mut bases: Vec<PathBuf> = vec![PathBuf::from("/mnt"), PathBuf::from("/media")];
@@ -396,4 +401,19 @@ fn mount_roots() -> Vec<PathBuf> {
         }
     }
     roots
+}
+
+/// Mounted volumes: non-hidden directories directly beneath /Volumes.
+#[cfg(target_os = "macos")]
+fn mount_roots() -> Vec<PathBuf> {
+    list_subfolders(Path::new("/Volumes"), false).unwrap_or_default()
+}
+
+/// Every existing drive letter, `A:\` … `Z:\`.
+#[cfg(windows)]
+fn mount_roots() -> Vec<PathBuf> {
+    (b'A'..=b'Z')
+        .map(|letter| PathBuf::from(format!("{}:\\", char::from(letter))))
+        .filter(|root| root.is_dir())
+        .collect()
 }

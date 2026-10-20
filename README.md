@@ -18,6 +18,44 @@ A fast, video-first media browser for Linux, written in Rust (egui + wgpu) on th
 
 Keyboard shortcuts: [docs/user_guide/KEYBOARD_SHORTCUTS.md](docs/user_guide/KEYBOARD_SHORTCUTS.md).
 
+## Install
+
+Prebuilt packages for each release are attached to the
+[GitHub Releases](https://github.com/NickPittas/GalleryBrowser/releases) page (`<ver>` is the version, e.g. `0.2.0`).
+
+### Linux (Flatpak)
+
+Download `GalleryBrowser-<ver>.flatpak` from Releases, then:
+
+```sh
+flatpak install --user GalleryBrowser-<ver>.flatpak
+flatpak run io.github.nickpittas.GalleryBrowser
+```
+
+### macOS (11 or later, Apple Silicon and Intel)
+
+1. Download `GalleryBrowser-<ver>-macos-universal.dmg`, open it and drag **GalleryBrowser** to **Applications**.
+2. The app is ad-hoc signed but **not notarized** (no Apple Developer ID), so Gatekeeper blocks the first launch.
+   Right-click (or Control-click) the app, choose **Open**, then confirm **Open** in the dialog. Alternatively, remove
+   the quarantine flag once:
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/GalleryBrowser.app
+   ```
+
+### Windows (10/11, x64)
+
+- **Installer**: run `GalleryBrowser-<ver>-windows-x64-setup.exe` (per-user install, no administrator rights needed;
+  adds a Start menu entry and an optional desktop shortcut).
+- **Portable**: unzip `GalleryBrowser-<ver>-windows-x64.zip` anywhere and run `gallerybrowser.exe`.
+
+The binaries are **not code-signed**, so Windows SmartScreen may show "Windows protected your PC" on first launch.
+Click **More info**, then **Run anyway**. If you downloaded the zip, you can instead right-click it, open
+**Properties** and tick **Unblock** before extracting.
+
+The macOS and Windows packages are built by the [Release workflow](.github/workflows/release.yml) on GitHub Actions
+when a `v*` tag is pushed.
+
 ## Requirements
 
 - Rust >= 1.95 (edition 2024)

@@ -5,7 +5,12 @@ use directories::BaseDirs;
 
 use crate::{CoreError, Result};
 
+/// Directory name below the platform's per-user base directories. Linux keeps the lowercase XDG
+/// name; macOS and Windows use the capitalised name those platforms' users expect.
+#[cfg(target_os = "linux")]
 const APP: &str = "gallerybrowser";
+#[cfg(not(target_os = "linux"))]
+const APP: &str = "GalleryBrowser";
 
 /// Content of the `CACHEDIR.TAG` file (https://bford.info/cachedir/) so backup tools skip the cache.
 const CACHEDIR_TAG: &str = "Signature: 8a477f597d28d172789f06886806bc55\n\
@@ -14,17 +19,24 @@ const CACHEDIR_TAG: &str = "Signature: 8a477f597d28d172789f06886806bc55\n\
 #\thttps://bford.info/cachedir/\n";
 
 /// Per-user directories. Every directory is created and PROBED FOR WRITABILITY (create+delete a temp file);
-/// on failure falls back to `$XDG_*`-independent `~/.local/state/gallerybrowser/<kind>`, then to a
-/// private temp dir. (Fixes the Python bug where an existing read-only dir was accepted.)
+/// on failure falls back to `~/.local/state/<app>/<kind>` (independent of any platform base directory),
+/// then to a private temp dir. (Fixes the Python bug where an existing read-only dir was accepted.)
+///
+/// | | Linux (XDG) | macOS | Windows |
+/// |---|---|---|---|
+/// | config | `~/.config/gallerybrowser` | `~/Library/Application Support/GalleryBrowser` | `%APPDATA%\GalleryBrowser` |
+/// | data | `~/.local/share/gallerybrowser` | `~/Library/Application Support/GalleryBrowser` | `%LOCALAPPDATA%\GalleryBrowser` |
+/// | cache | `~/.cache/gallerybrowser` | `~/Library/Caches/GalleryBrowser` | `%LOCALAPPDATA%\GalleryBrowser` |
+/// | runtime | `$XDG_RUNTIME_DIR/gallerybrowser` | cache | cache |
 #[derive(Clone, Debug)]
 pub struct AppDirs {
-    /// `~/.config/gallerybrowser` — settings.json
+    /// settings.json
     pub config: PathBuf,
-    /// `~/.local/share/gallerybrowser` — library catalog
+    /// library catalog
     pub data: PathBuf,
-    /// `~/.cache/gallerybrowser` — thumbnails (`thumbnails/`), CACHEDIR.TAG
+    /// thumbnails (`thumbnails/`), crash logs, CACHEDIR.TAG
     pub cache: PathBuf,
-    /// `$XDG_RUNTIME_DIR/gallerybrowser` (fallback: cache) — single-instance socket
+    /// single-instance socket (the cache dir where the platform has no runtime dir)
     pub runtime: PathBuf,
 }
 
@@ -32,17 +44,22 @@ impl AppDirs {
     pub fn resolve() -> Result<Self> {
         let base = BaseDirs::new();
         let home = base.as_ref().map(|b| b.home_dir().to_path_buf());
-        let xdg = |pick: fn(&BaseDirs) -> PathBuf| base.as_ref().map(|b| pick(b).join(APP));
+        let app_dir = |pick: fn(&BaseDirs) -> PathBuf| base.as_ref().map(|b| pick(b).join(APP));
 
         let config = resolve_dir(
             "config",
-            xdg(|b| b.config_dir().to_path_buf()),
+            app_dir(|b| b.config_dir().to_path_buf()),
             home.as_deref(),
         )?;
-        let data = resolve_dir("data", xdg(|b| b.data_dir().to_path_buf()), home.as_deref())?;
+        // `data_dir` is the roaming profile on Windows; the catalog is machine-local state.
+        #[cfg(windows)]
+        let data_primary = app_dir(|b| b.data_local_dir().to_path_buf());
+        #[cfg(not(windows))]
+        let data_primary = app_dir(|b| b.data_dir().to_path_buf());
+        let data = resolve_dir("data", data_primary, home.as_deref())?;
         let cache = resolve_dir(
             "cache",
-            xdg(|b| b.cache_dir().to_path_buf()),
+            app_dir(|b| b.cache_dir().to_path_buf()),
             home.as_deref(),
         )?;
         let runtime = base
@@ -63,8 +80,12 @@ impl AppDirs {
         })
     }
 
-    /// Python-era SQLite database (`~/.cache/gallerybrowser/database.sqlite`) if present, for one-time import.
+    /// Python-era SQLite database (`~/.cache/gallerybrowser/database.sqlite`) if present, for one-time
+    /// import. The Python app only ever existed on Linux, so other platforms never report one.
     pub fn legacy_database(&self) -> Option<PathBuf> {
+        if !cfg!(target_os = "linux") {
+            return None;
+        }
         let path = self.cache.join("database.sqlite");
         path.is_file().then_some(path)
     }
@@ -111,6 +132,7 @@ fn first_writable(candidates: &[PathBuf]) -> Option<PathBuf> {
 fn user_tag() -> String {
     let raw = std::env::var("USER")
         .or_else(|_| std::env::var("LOGNAME"))
+        .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_default();
     let tag: String = raw
         .chars()
@@ -124,13 +146,14 @@ fn user_tag() -> String {
     }
 }
 
-/// Create `dir` (mode 0700 for new directories) and prove it is writable by creating and deleting a file.
+/// Create `dir` (mode 0700 for new directories on unix) and prove it is writable by creating and
+/// deleting a file.
 fn ensure_writable_dir(dir: &Path) -> std::io::Result<PathBuf> {
-    use std::os::unix::fs::DirBuilderExt;
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)?;
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)?;
     if !std::fs::metadata(dir)?.is_dir() {
         return Err(std::io::Error::other("not a directory"));
     }
@@ -163,6 +186,7 @@ fn write_cachedir_tag(cache: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -176,6 +200,7 @@ mod tests {
         assert_eq!(std::fs::read_dir(&target).expect("read").count(), 0);
     }
 
+    #[cfg(unix)]
     #[test]
     fn existing_read_only_dir_is_rejected_and_fallback_used() {
         let t = tempfile::tempdir().expect("tempdir");
@@ -228,10 +253,9 @@ mod tests {
 
         assert_eq!(dirs.legacy_database(), None);
         std::fs::write(dirs.cache.join("database.sqlite"), b"").expect("write");
-        assert_eq!(
-            dirs.legacy_database(),
-            Some(dirs.cache.join("database.sqlite"))
-        );
+        // Only Linux ever had the Python app's database.
+        let expected = cfg!(target_os = "linux").then(|| dirs.cache.join("database.sqlite"));
+        assert_eq!(dirs.legacy_database(), expected);
         assert_eq!(dirs.settings_file(), dirs.config.join("settings.json"));
         assert_eq!(dirs.instance_socket(), dirs.runtime.join("instance.sock"));
     }

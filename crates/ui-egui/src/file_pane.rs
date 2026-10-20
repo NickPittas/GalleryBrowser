@@ -110,7 +110,7 @@ fn show_pane(ui: &mut egui::Ui, state: &mut AppState, pane: &mut FilePaneState, 
     let outer = ui.available_rect_before_wrap();
     let pending_before = state.pending.len();
     let mut acts: Vec<Action> = Vec::new();
-    crate::breadcrumb::show(ui, state);
+    crate::breadcrumb::show(ui, state, is_active);
     ui.separator();
     if state.pane().filters.search != pane.search_seen {
         pane.search = state.pane().filters.search.clone();
