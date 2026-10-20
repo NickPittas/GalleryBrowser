@@ -1,5 +1,5 @@
-//! Fullscreen viewer drawn inside the main window (the root viewport is switched to OS fullscreen by
-//! the app; a second OS window froze the whole app on Wayland compositors). It owns a [`MediaView`]
+//! Viewer drawn inside the main window, filling it at its current size (no automatic OS fullscreen; a
+//! second OS window froze the whole app on Wayland compositors). It owns a [`MediaView`]
 //! (its own `Player`, off-thread opener, texture and zoom/pan state), shows an auto-hiding header +
 //! transport overlay and follows `FullscreenState::path` (the Shell changes it on
 //! `Action::FullscreenStep`).
@@ -29,7 +29,6 @@ pub struct FullscreenState {
     /// Path the view was last asked to open.
     loaded: Option<PathBuf>,
     name: String,
-    os_fullscreen: bool,
     last_activity: Instant,
     last_audio: (f32, bool, bool),
 }
@@ -41,23 +40,34 @@ impl FullscreenState {
             view: None,
             loaded: None,
             name: String::new(),
-            os_fullscreen: true,
             last_activity: Instant::now(),
             last_audio: (1.0, false, true),
         }
     }
 }
 
-/// Called every frame while `state.fullscreen` is `Some`; fills the whole root `ui`.
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+/// Called every frame while `state.fullscreen` is `Some`; fills the whole root `ui` (the main window at its
+/// current size). `os_restore` holds the window's OS-fullscreen state from before the user pressed F in the
+/// viewer (`None` while F has not been used); [`restore_os_fullscreen`] applies it when the viewer closes.
+pub fn show(ui: &mut Ui, state: &mut AppState, os_restore: &mut Option<bool>) {
     let Some(mut fs) = state.fullscreen.take() else {
         return;
     };
     init_view(state, &mut fs);
-    content(ui, state, &mut fs);
+    content(ui, state, &mut fs, os_restore);
     // a CloseFullscreen queued by `content` is applied by the dispatcher; keep the state until then
     if state.fullscreen.is_none() {
         state.fullscreen = Some(fs);
+    }
+}
+
+/// After the viewer closed, put the window back into the OS-fullscreen state it had before F was used.
+pub fn restore_os_fullscreen(ctx: &egui::Context, state: &AppState, os_restore: &mut Option<bool>) {
+    if state.fullscreen.is_none()
+        && let Some(prior) = os_restore.take()
+    {
+        ctx.send_viewport_cmd(ViewportCommand::Fullscreen(prior));
+        ctx.request_repaint();
     }
 }
 
@@ -180,7 +190,12 @@ fn read_keys(ui: &Ui) -> Keys {
     })
 }
 
-fn content(ui: &mut Ui, state: &mut AppState, fs: &mut FullscreenState) {
+fn content(
+    ui: &mut Ui,
+    state: &mut AppState,
+    fs: &mut FullscreenState,
+    os_restore: &mut Option<bool>,
+) {
     let ctx = ui.ctx().clone();
     reload_if_changed(state, fs);
     let keys = read_keys(ui);
@@ -196,8 +211,15 @@ fn content(ui: &mut Ui, state: &mut AppState, fs: &mut FullscreenState) {
         ctx.request_repaint();
     }
     if keys.fullscreen {
-        fs.os_fullscreen = !fs.os_fullscreen;
-        ctx.send_viewport_cmd(ViewportCommand::Fullscreen(fs.os_fullscreen));
+        let now = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        match os_restore.take() {
+            // F again: go back to the state the window had before the first F
+            Some(prior) => ctx.send_viewport_cmd(ViewportCommand::Fullscreen(prior)),
+            None => {
+                *os_restore = Some(now);
+                ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!now));
+            }
+        }
     }
 
     let idle = fs.last_activity.elapsed();

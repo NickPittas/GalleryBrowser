@@ -52,9 +52,10 @@ pub struct GalleryApp {
     left_tab: LeftTab,
     status_seen: Option<(StatusKind, String)>,
     status_at: Instant,
-    title_for: Option<PathBuf>,
-    /// `Some(previous OS fullscreen state)` while the root window is fullscreened for the viewer.
-    restore_fullscreen: Option<bool>,
+    /// Last window title sent to the compositor.
+    title: String,
+    /// OS-fullscreen state of the window from before F was pressed in the viewer (`None` = F unused).
+    os_restore: Option<bool>,
 }
 
 impl GalleryApp {
@@ -138,8 +139,8 @@ impl GalleryApp {
             left_tab: LeftTab::Folders,
             status_seen: None,
             status_at: Instant::now(),
-            title_for: None,
-            restore_fullscreen: None,
+            title: String::new(),
+            os_restore: None,
         })
     }
 
@@ -486,13 +487,10 @@ impl eframe::App for GalleryApp {
             self.state.quit_requested = false;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if self.title_for != self.state.nav.current {
-            self.title_for = self.state.nav.current.clone();
-            let title = match &self.title_for {
-                Some(p) => format!("GalleryBrowser — {}", p.display()),
-                None => "GalleryBrowser".to_string(),
-            };
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        let title = window_title(&self.state);
+        if title != self.title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title = title;
         }
     }
 
@@ -501,14 +499,14 @@ impl eframe::App for GalleryApp {
         let ctx = ui.ctx().clone();
 
         if self.state.fullscreen.is_some() {
-            fullscreen::show(ui, &mut self.state);
+            fullscreen::show(ui, &mut self.state, &mut self.os_restore);
             self.dialogs(&ctx);
         } else {
             self.panels(ui);
             self.dialogs(&ctx);
         }
         actions::dispatch_pending(&mut self.state, &ctx);
-        self.sync_os_fullscreen(&ctx);
+        fullscreen::restore_os_fullscreen(&ctx, &self.state, &mut self.os_restore);
     }
 
     /// Save settings (incl. last_folder, volume), shut down preview/player and workers.
@@ -520,24 +518,6 @@ impl eframe::App for GalleryApp {
 }
 
 impl GalleryApp {
-    /// Fullscreen the root window while the viewer is open; restore the previous state on close.
-    fn sync_os_fullscreen(&mut self, ctx: &egui::Context) {
-        match (self.state.fullscreen.is_some(), self.restore_fullscreen) {
-            (true, None) => {
-                let prior = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                self.restore_fullscreen = Some(prior);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
-                ctx.request_repaint();
-            }
-            (false, Some(prior)) => {
-                self.restore_fullscreen = None;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(prior));
-                ctx.request_repaint();
-            }
-            _ => {}
-        }
-    }
-
     /// Lay out all normal panels into the root `ui`.
     fn panels(&mut self, ui: &mut egui::Ui) {
         egui::Panel::top("menu_bar").show(ui, |ui| self.menu_bar(ui));
@@ -566,20 +546,35 @@ impl GalleryApp {
                 .default_size(340.0)
                 .size_range(250.0..=520.0)
                 .show(ui, |ui| {
-                    egui::Panel::bottom("info_panel")
-                        .resizable(true)
-                        .default_size(300.0)
-                        .size_range(150.0..=600.0)
-                        .frame(egui::Frame::NONE)
+                    // the preview sizes itself (picture + transport rows); info takes all the rest
+                    preview::show(ui, &mut self.state);
+                    ui.add_space(4.0);
+                    ui.separator();
+                    egui::ScrollArea::vertical()
+                        .id_salt("info_scroll")
+                        .auto_shrink([false, false])
                         .show(ui, |ui| info_pane::show(ui, &mut self.state));
-                    egui::CentralPanel::no_frame()
-                        .show(ui, |ui| preview::show(ui, &mut self.state));
                 });
         }
 
         egui::CentralPanel::default_margins().show(ui, |ui| {
             file_pane::show(ui, &mut self.state, &mut self.pane)
         });
+    }
+}
+
+/// Window title: the viewed file name while the viewer is open, otherwise the current folder.
+fn window_title(state: &AppState) -> String {
+    if let Some(fs) = &state.fullscreen {
+        let name = fs.path.file_name().map_or_else(
+            || fs.path.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        return format!("GalleryBrowser — {name}");
+    }
+    match &state.nav.current {
+        Some(p) => format!("GalleryBrowser — {}", p.display()),
+        None => "GalleryBrowser".to_string(),
     }
 }
 

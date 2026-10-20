@@ -11,6 +11,7 @@ pub mod metadata;
 pub mod open;
 mod png_text;
 mod scrub;
+mod sequence;
 pub mod thumbs;
 
 pub use filmcraft_frame::{AudioBuffer, VideoFrame};

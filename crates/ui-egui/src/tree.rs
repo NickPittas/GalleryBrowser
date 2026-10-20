@@ -113,7 +113,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, tree: &mut TreeState) {
                         ui.weak("No recent folders");
                     }
                     for p in list {
-                        ui.push_id("recent", |ui| {
+                        ui.push_id(("recent", &p), |ui| {
                             node(ui, &mut f, &p, None, 0, Section::Recent)
                         });
                     }
@@ -193,11 +193,13 @@ fn node(
     depth: usize,
     section: Section,
 ) {
-    let expanded = f.tree.expanded.contains(path);
+    // Recent rows are a flat list of visited folders: never expandable, never show children.
+    let flat = section == Section::Recent;
+    let expanded = !flat && f.tree.expanded.contains(path);
     if expanded {
         f.load_children(path);
     }
-    let can_expand = f.tree.children.get(path).is_none_or(|c| !c.is_empty());
+    let can_expand = !flat && f.tree.children.get(path).is_none_or(|c| !c.is_empty());
     let name = label.map(str::to_string).unwrap_or_else(|| {
         path.file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -211,6 +213,9 @@ fn node(
         Sense::click(),
     );
     let drop_target = resp.dnd_hover_payload::<DragPaths>().is_some();
+    if flat {
+        resp.clone().on_hover_text(path.display().to_string());
+    }
     if ui.is_rect_visible(rect) {
         let p = ui.painter();
         if selected {
@@ -271,9 +276,10 @@ fn node(
 
     let mut toggled = false;
     if resp.clicked() {
-        let on_arrow = resp
-            .interact_pointer_pos()
-            .is_some_and(|pos| pos.x < rect.min.x + indent + 18.0);
+        let on_arrow = can_expand
+            && resp
+                .interact_pointer_pos()
+                .is_some_and(|pos| pos.x < rect.min.x + indent + 18.0);
         if !on_arrow {
             f.acts.push(Action::Navigate(path.to_path_buf()));
         }

@@ -1788,6 +1788,7 @@ name = "gallerybrowser-media"
 version = "0.2.0"
 dependencies = [
  "crossbeam-channel",
+ "exr",
  "filmcraft-codecs",
  "filmcraft-frame",
  "filmcraft-media",

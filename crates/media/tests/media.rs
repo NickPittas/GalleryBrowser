@@ -521,3 +521,122 @@ fn metadata_worker_delivers_only_the_latest_request() {
     assert_eq!(m.width, Some(20));
     assert!(w.poll().is_none(), "delivered once");
 }
+
+/// A Blender-style multi-part OpenEXR: part 0 the beauty pass `ViewLayer.Combined` (linear RGBA),
+/// part 1 a depth pass. `red` is the linear red value of every pixel.
+#[allow(clippy::expect_used)]
+fn write_multipart_exr(path: &Path, w: usize, h: usize, red: f32) {
+    use exr::prelude::*;
+    let size = Vec2(w, h);
+    let beauty = Layer::new(
+        size,
+        LayerAttributes::named("ViewLayer.Combined"),
+        Encoding::FAST_LOSSLESS,
+        SpecificChannels::rgba(move |_pos| (red, 0.1_f32, 0.1_f32, 1.0_f32)),
+    );
+    let depth = Layer::new(
+        size,
+        LayerAttributes::named("ViewLayer.Depth"),
+        Encoding::FAST_LOSSLESS,
+        SpecificChannels::build()
+            .with_channel("Z")
+            .with_pixel_fn(|_pos| (5.0_f32,)),
+    );
+    Image::empty(ImageAttributes::new(IntegerBounds::from_dimensions(size)))
+        .with_layer(beauty)
+        .with_layer(depth)
+        .write()
+        .to_file(path)
+        .expect("write exr");
+}
+
+#[test]
+fn multipart_exr_sequences_decode_through_the_photocraft_fallback() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let mut frames = Vec::new();
+    for (k, n) in [49i64, 50, 51].into_iter().enumerate() {
+        let p = dir.path().join(format!("shot_{n:04}.exr"));
+        write_multipart_exr(&p, 40, 24, 0.25 * (k as f32 + 1.0));
+        frames.push(SequenceFrame { number: n, path: p });
+    }
+    let seq = Sequence {
+        dir: dir.path().to_path_buf(),
+        prefix: "shot_".into(),
+        suffix: ".exr".into(),
+        padding: 4,
+        frames,
+    };
+    let fps = FrameRate::new(24, 1);
+    let src = open_sequence(&seq, fps).expect("open multi-part exr sequence");
+    let v = src.info().video.clone().expect("video");
+    assert_eq!((v.width, v.height), (40, 24));
+    assert_eq!(src.info().duration, fps.tick_of(3));
+
+    // linear 0.25 / 0.5 / 0.75 in the beauty layer, displayed as sRGB
+    let mut reds = Vec::new();
+    for i in 0..3 {
+        let f = src
+            .video_frame(FrameRequest::full(fps.tick_of(i)))
+            .expect("frame");
+        let im = frame_to_rgba(&f).expect("rgba");
+        assert_eq!((im.width, im.height), (40, 24));
+        let px = im.pixels.as_chunks::<4>().0;
+        let first = px.first().expect("pixel");
+        assert!(
+            px.iter().all(|p| p == first),
+            "constant picture (frame {i})"
+        );
+        assert_eq!(first[3], 255);
+        assert!(
+            first[1] < first[0],
+            "green is the dim 0.1 channel: {first:?}"
+        );
+        reds.push(first[0]);
+    }
+    for (got, want) in reds.iter().zip([137u8, 188, 224]) {
+        assert!(got.abs_diff(want) <= 3, "{reds:?} vs sRGB of 0.25/0.5/0.75");
+    }
+
+    // frames decode on worker threads (player prefetch) and out of order
+    std::thread::scope(|s| {
+        for i in [2i64, 0, 1] {
+            let src = Arc::clone(&src);
+            s.spawn(move || {
+                src.video_frame(FrameRequest::full(fps.tick_of(i)))
+                    .expect("threaded frame");
+            });
+        }
+    });
+
+    // thumbnails of the sequence use the same decoder chain
+    let t = Thumbnailer::new(thumb_cfg(&dir.path().join("cache")));
+    let entry = Entry {
+        path: dir.path().join("shot_####.exr"),
+        name: "shot_[49-51].exr".into(),
+        kind: MediaKind::Sequence,
+        size: 3,
+        modified: Some(SystemTime::now()),
+        sequence: Some(Arc::new(seq.clone())),
+    };
+    t.request(&entry, 20, 0);
+    let r = wait_results(&t, 1);
+    let im = r
+        .first()
+        .and_then(|r| r.image.as_ref().ok())
+        .expect("multi-part exr sequence thumb");
+    assert_eq!((im.width, im.height), (20, 12));
+
+    // a damaged frame is an error for that frame only
+    std::fs::write(&seq.frames[1].path, b"not an exr").expect("corrupt");
+    let fresh = open_sequence(&seq, fps).expect("first frame still opens");
+    assert!(
+        fresh
+            .video_frame(FrameRequest::full(fps.tick_of(1)))
+            .is_err()
+    );
+    assert!(
+        fresh
+            .video_frame(FrameRequest::full(fps.tick_of(2)))
+            .is_ok()
+    );
+}

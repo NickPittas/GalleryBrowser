@@ -2,7 +2,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use filmcraft_media::reader::{FileReader, SharedReader, open_reader_within};
-use filmcraft_media::sequence::{FrameLoader, ImageSequenceSource};
 use filmcraft_media::still::StillSource;
 use gallerybrowser_core::Sequence;
 
@@ -84,21 +83,39 @@ fn open_with_photocraft(path: &Path, name: &str) -> Result<SharedSource> {
     if bytes.starts_with(b"8BPS") {
         return psd_still(name, &bytes);
     }
+    let (w, h, rgba, has_alpha) = photocraft_rgba(name, &bytes)?;
+    Ok(Guarded::wrap(Arc::new(StillSource::from_rgba(
+        name,
+        w,
+        h,
+        rgba,
+        has_alpha,
+        bytes.len() as u64,
+    ))))
+}
+
+/// Decode `bytes` through photocraft-codecs (multi-part / multi-layer OpenEXR included: the beauty
+/// layer, linear float data encoded to display sRGB) to straight-alpha sRGB RGBA8: width, height,
+/// pixels, whether any pixel is translucent.
+pub(crate) fn photocraft_rgba(name: &str, bytes: &[u8]) -> Result<(u32, u32, Vec<u8>, bool)> {
     guard::catch(|| {
-        let img = photocraft_codecs::decode(&bytes)
+        let img = photocraft_codecs::decode(bytes)
             .map_err(|e| MediaError::Decode(format!("{name}: {e}")))?;
         let (w, h) = img.dimensions();
         let has_alpha = img.has_translucency();
-        let rgba = img.to_rgba8();
+        let rgba = match img.sample_type() {
+            // OpenEXR / float data is scene-linear with premultiplied alpha: encode it for display
+            // exactly like filmcraft's own EXR frames (`VideoFrame::to_rgba8`).
+            photocraft_codecs::SampleType::F16 | photocraft_codecs::SampleType::F32 => {
+                let linear = img.to_rgba_f32();
+                let mut out = vec![0u8; linear.len()];
+                filmcraft_frame::linear_premul_to_srgb8(&linear, &mut out);
+                out
+            }
+            _ => img.to_rgba8(),
+        };
         check_rgba(name, w, h, rgba.len())?;
-        Ok(Guarded::wrap(Arc::new(StillSource::from_rgba(
-            name,
-            w,
-            h,
-            rgba,
-            has_alpha,
-            bytes.len() as u64,
-        ))))
+        Ok((w, h, rgba, has_alpha))
     })
 }
 
@@ -141,29 +158,10 @@ fn check_rgba(name: &str, w: u32, h: u32, len: usize) -> Result<()> {
 }
 
 /// Image sequence as a movie source at `fps`; frame `i` of the source is `seq.frames[i]` (sparse
-/// numbering is preserved for display by `Sequence`, so there are no gaps to hold). Built on
-/// `filmcraft_media::sequence::ImageSequenceSource` (lazy decoding, bounded frame cache).
+/// numbering is preserved for display by `Sequence`, so there are no gaps to hold). Each frame goes
+/// through the same decoder chain as [`open`] (filmcraft stills, then photocraft-codecs, which
+/// reads Blender multi-part / multi-layer OpenEXR); decoding is lazy with a bounded frame cache.
 pub fn open_sequence(seq: &Sequence, fps: FrameRate) -> Result<SharedSource> {
-    if seq.frames.is_empty() {
-        return Err(MediaError::Unsupported(
-            "image sequence has no frames".into(),
-        ));
-    }
-    let frames: Vec<Option<String>> = seq
-        .frames
-        .iter()
-        .map(|f| Some(f.path.to_string_lossy().into_owned()))
-        .collect();
-    let loader: FrameLoader = Arc::new(|p: &str| {
-        let meta = std::fs::metadata(p)?;
-        if meta.len() > MAX_STILL_BYTES {
-            return Err(std::io::Error::other("frame file too large"));
-        }
-        std::fs::read(p)
-    });
-    let name = seq.display_name();
-    guard::catch(|| {
-        let src = ImageSequenceSource::new(&name, frames, fps.sane(), loader).map_err(convert)?;
-        Ok(Guarded::wrap(Arc::new(src)))
-    })
+    let frames = seq.frames.iter().map(|f| f.path.clone()).collect();
+    crate::sequence::open_frames(&seq.display_name(), frames, fps.sane())
 }

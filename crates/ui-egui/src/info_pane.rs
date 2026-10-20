@@ -28,37 +28,36 @@ struct AnnotationCache {
 
 /// Metadata of the focused entry (state.current_metadata): file, video, audio, sequence, EXIF,
 /// ComfyUI sections; annotations (rating stars editable, tags chips add/remove, collections).
+///
+/// Renders its content top-down at the current width; the caller (`app.rs`) owns the vertical
+/// `ScrollArea` that provides the remaining height.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let mut actions: Vec<Action> = Vec::new();
     {
         let state_ref = &*state;
-        egui::ScrollArea::vertical()
-            .id_salt("info-pane-scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let Some(focused) = state_ref.selection.focused.as_ref() else {
-                    ui.weak("Nothing selected");
-                    return;
-                };
-                let entry = state_ref.entry(focused);
-                let name = entry.map(|e| e.name.clone()).unwrap_or_else(|| {
-                    focused
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| focused.display().to_string())
-                });
-                ui.add(egui::Label::new(egui::RichText::new(name).strong().size(15.0)).wrap());
-                if let Some(entry) = entry {
-                    annotations_block(ui, state_ref, entry, &mut actions);
-                }
-                ui.add_space(4.0);
-                match state_ref.current_metadata.as_ref() {
-                    Some(meta) => metadata_sections(ui, meta),
-                    None => {
-                        ui.weak("Loading metadata…");
-                    }
-                }
+        ui.add_space(ui.spacing().item_spacing.y);
+        if let Some(focused) = state_ref.selection.focused.as_ref() {
+            let entry = state_ref.entry(focused);
+            let name = entry.map(|e| e.name.clone()).unwrap_or_else(|| {
+                focused
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| focused.display().to_string())
             });
+            ui.add(egui::Label::new(egui::RichText::new(name).strong().size(15.0)).wrap());
+            if let Some(entry) = entry {
+                annotations_block(ui, state_ref, entry, &mut actions);
+            }
+            ui.add_space(4.0);
+            match state_ref.current_metadata.as_ref() {
+                Some(meta) => metadata_sections(ui, meta),
+                None => {
+                    ui.weak("Loading metadata…");
+                }
+            }
+        } else {
+            ui.weak("Nothing selected");
+        }
     }
     if !actions.is_empty() {
         ui.ctx().data_mut(|d| {

@@ -520,6 +520,17 @@ impl MediaView {
         }
         resp
     }
+
+    /// Display aspect (width / height, pixel aspect applied) of the shown picture; 16:9 while
+    /// nothing is visible yet.
+    pub fn aspect(&self) -> f32 {
+        let [w, h] = self.frame_size;
+        if self.tex_visible && w > 0 && h > 0 && self.par.is_finite() && self.par > 0.0 {
+            (w as f32 * self.par / h as f32).clamp(0.2, 8.0)
+        } else {
+            16.0 / 9.0
+        }
+    }
 }
 
 /// Centered (or, for errors over a picture, bottom-anchored on a dark strip) wrapped text.
@@ -662,26 +673,42 @@ pub(crate) fn sync_audio_to_settings(settings: &mut Settings, audio: (f32, bool,
     settings.loop_playback = looping;
 }
 
+/// Largest share of the panel height the side preview picture may take.
+const PICTURE_MAX_FRACTION: f32 = 0.4;
+/// Smallest picture height of the side preview.
+const PICTURE_MIN_HEIGHT: f32 = 120.0;
+
+/// Side-preview picture height: aspect-fit to `width`, capped at 40% of `panel_height`, never below
+/// [`PICTURE_MIN_HEIGHT`].
+fn picture_height(width: f32, panel_height: f32, aspect: f32) -> f32 {
+    let cap = (panel_height * PICTURE_MAX_FRACTION).max(PICTURE_MIN_HEIGHT);
+    let aspect = if aspect.is_finite() && aspect > 0.0 {
+        aspect
+    } else {
+        16.0 / 9.0
+    };
+    (width / aspect).clamp(PICTURE_MIN_HEIGHT, cap)
+}
+
+/// Right-panel preview: the picture in an aspect-fit box (never filling the panel), then the
+/// transport for time-based media, then a separator; the info pane follows below.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let ctx = ui.ctx().clone();
     let preview = &mut state.preview;
     preview.view.poll(&ctx);
 
-    let avail = ui.available_size();
-    let movie = preview.view.is_movie();
-    let reserve = if movie {
-        transport::HEIGHT + ui.spacing().item_spacing.y
-    } else {
-        0.0
-    };
-    let picture_size = vec2(avail.x.max(8.0), (avail.y - reserve).max(48.0));
-    ui.allocate_ui(picture_size, |ui| {
+    let width = ui.available_width().max(8.0);
+    let height = picture_height(width, ui.available_height(), preview.view.aspect());
+    ui.allocate_ui(vec2(width, height), |ui| {
         preview.view.picture_ui(ui);
     });
-    if movie {
+    if preview.view.is_movie() {
+        ui.add_space(ui.spacing().item_spacing.y);
         let view = &mut preview.view;
         transport::show(ui, &mut view.player, view.sequence.as_deref());
     }
+    ui.add_space(4.0);
+    ui.separator();
 
     if preview.audio_applied {
         let audio = preview.audio_settings();
@@ -703,6 +730,17 @@ mod tests {
             height: h,
             pixels: Arc::new(px),
         }
+    }
+
+    #[test]
+    fn picture_height_fits_width_and_is_capped() {
+        // 340 wide 16:9 -> 191, under the 40% cap of an 800 px panel (320).
+        assert!((picture_height(340.0, 800.0, 16.0 / 9.0) - 191.25).abs() < 0.01);
+        // Tall media is capped at 40% of the panel height.
+        assert!((picture_height(340.0, 800.0, 0.5) - 320.0).abs() < 0.01);
+        // Tiny panels keep the minimum; bad aspect falls back to 16:9.
+        assert!((picture_height(340.0, 100.0, 0.5) - PICTURE_MIN_HEIGHT).abs() < 0.01);
+        assert!((picture_height(340.0, 800.0, f32::NAN) - 191.25).abs() < 0.01);
     }
 
     #[test]

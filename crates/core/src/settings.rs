@@ -208,10 +208,12 @@ impl Settings {
         Ok(())
     }
 
-    /// Push to front of recents (dedupe, truncate).
+    /// Record a visited folder. Folders already in recents keep their position (the list does not
+    /// reorder on revisit); new folders go to the front. Deduplicated, truncated to `recents_max`.
     pub fn add_recent(&mut self, folder: PathBuf) {
-        self.recents.retain(|p| p != &folder);
-        self.recents.insert(0, folder);
+        if !self.recents.contains(&folder) {
+            self.recents.insert(0, folder);
+        }
         self.recents.truncate(self.recents_max.clamp(1, 100));
     }
 }
@@ -374,20 +376,36 @@ mod tests {
     }
 
     #[test]
-    fn add_recent_moves_to_front_dedupes_and_truncates() {
+    fn add_recent_keeps_order_on_revisit_dedupes_and_truncates() {
         let mut s = Settings {
             recents_max: 3,
             ..Settings::default()
         };
-        for p in ["/a", "/b", "/c", "/b", "/d"] {
+        for p in ["/a", "/b", "/c"] {
             s.add_recent(PathBuf::from(p));
         }
+        let before = s.recents.clone();
+        assert_eq!(
+            before,
+            vec![
+                PathBuf::from("/c"),
+                PathBuf::from("/b"),
+                PathBuf::from("/a")
+            ]
+        );
+        // Revisiting existing entries must not change the list.
+        for p in ["/a", "/b", "/c", "/a"] {
+            s.add_recent(PathBuf::from(p));
+        }
+        assert_eq!(s.recents, before);
+        // A new folder goes to the front and the oldest is truncated.
+        s.add_recent(PathBuf::from("/d"));
         assert_eq!(
             s.recents,
             vec![
                 PathBuf::from("/d"),
-                PathBuf::from("/b"),
-                PathBuf::from("/c")
+                PathBuf::from("/c"),
+                PathBuf::from("/b")
             ]
         );
     }

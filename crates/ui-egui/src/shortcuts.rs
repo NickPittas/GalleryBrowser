@@ -26,7 +26,7 @@ pub fn handle(ctx: &egui::Context, state: &mut AppState) {
     let ctrl_shift = Modifiers::COMMAND | Modifiers::SHIFT;
     let mut out: Vec<Action> = Vec::new();
     let mut step = 0i32;
-    let mut toggle_play = false;
+    let mut open_viewer = false;
     ctx.input_mut(|i| {
         // egui turns Ctrl+C/X/V into clipboard events rather than key presses.
         let mut keep = Vec::with_capacity(i.events.len());
@@ -98,16 +98,26 @@ pub fn handle(ctx: &egui::Context, state: &mut AppState) {
             step += 1;
         }
         if i.consume_key(Modifiers::NONE, Key::Space) {
-            toggle_play = true;
+            open_viewer = true;
         }
     });
     if step != 0 {
         state.preview.step_frame(step);
     }
-    if toggle_play {
-        state.preview.toggle_play();
+    if open_viewer && let Some(path) = viewer_target(state) {
+        out.push(Action::OpenFullscreen(path));
     }
     state.pending.extend(out);
+}
+
+/// The entry Space opens: the focused entry, else the only selected one. `None` unless it is a visible entry.
+fn viewer_target(state: &AppState) -> Option<std::path::PathBuf> {
+    let path = match &state.selection.focused {
+        Some(p) => p,
+        None if state.selection.items.len() == 1 => state.selection.items.iter().next()?,
+        None => return None,
+    };
+    state.entry(path).map(|e| e.path.clone())
 }
 
 /// (keys, description) rows for the shortcuts dialog.
@@ -133,7 +143,9 @@ pub fn table() -> Vec<(&'static str, &'static str)> {
         ("F2", "Rename selected item"),
         ("Ctrl+Z / Ctrl+Y", "Undo / redo file operation"),
         (", / .", "Step backward / forward one frame in the preview"),
-        ("Space", "Play / pause the preview"),
+        ("Space", "Open the focused / selected item in the viewer"),
+        ("Space (viewer)", "Play / pause"),
+        ("Esc (viewer)", "Close the viewer"),
         ("Ctrl+P", "Show / hide the preview pane"),
         ("F1", "Keyboard shortcuts"),
         ("Ctrl+Q", "Quit"),

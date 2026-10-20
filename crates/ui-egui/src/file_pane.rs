@@ -15,6 +15,7 @@ use gallerybrowser_media::Thumbnailer;
 pub use crate::state::DragPaths;
 use crate::state::{Action, AppState, SelectMode};
 use crate::textures::{TextureCache, scrub_edge};
+use crate::theme;
 
 /// Selectable thumbnail edges (the toolbar slider steps through these).
 const SIZES: [u32; 4] = [64, 128, 256, 512];
@@ -131,67 +132,118 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, pane: &mut FilePaneState) {
 
 // ───────────────────────────── toolbar ─────────────────────────────
 
+/// Width at which the whole toolbar fits on a single row; narrower panes split it into two rows
+/// (search + filters, then view controls) instead of letting groups collide.
+const TOOLBAR_ONE_ROW_WIDTH: f32 = 1100.0;
+
 fn toolbar(ui: &mut egui::Ui, state: &AppState, pane: &mut FilePaneState, acts: &mut Vec<Action>) {
-    ui.horizontal_wrapped(|ui| {
-        let resp = ui.add(
-            egui::TextEdit::singleline(&mut pane.search)
-                .hint_text("Search…")
-                .desired_width(180.0),
-        );
-        if resp.changed() {
-            acts.push(Action::SetSearch(pane.search.clone()));
-        }
-        if !pane.search.is_empty() && ui.small_button("×").on_hover_text("Clear search").clicked()
-        {
-            pane.search.clear();
-            acts.push(Action::SetSearch(String::new()));
-        }
+    let width = ui.available_width();
+    if width >= TOOLBAR_ONE_ROW_WIDTH {
+        ui.horizontal_wrapped(|ui| {
+            toolbar_filters(ui, state, pane, acts, width);
+            theme::group_separator(ui);
+            toolbar_view(ui, state, acts);
+        });
+    } else {
+        ui.horizontal_wrapped(|ui| toolbar_filters(ui, state, pane, acts, width));
+        ui.add_space(2.0);
+        ui.horizontal_wrapped(|ui| toolbar_view(ui, state, acts));
+    }
+}
 
-        kind_menu(ui, &state.filters.kinds, acts);
-        sort_menu(
-            ui,
-            state.settings.sort_key,
-            state.settings.sort_ascending,
-            acts,
-        );
+/// search | type + sort filters.
+fn toolbar_filters(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    pane: &mut FilePaneState,
+    acts: &mut Vec<Action>,
+    pane_width: f32,
+) {
+    // Leave room for the clear button, both filter menus and two separators.
+    let search_width = (pane_width - 320.0).clamp(90.0, 220.0);
+    let resp = ui.add(
+        egui::TextEdit::singleline(&mut pane.search)
+            .hint_text("Search…")
+            .desired_width(search_width)
+            .margin(egui::vec2(6.0, 4.0)),
+    );
+    if resp.changed() {
+        acts.push(Action::SetSearch(pane.search.clone()));
+    }
+    if !pane.search.is_empty()
+        && theme::small_icon_button(ui, theme::Icon::Close, "Clear search")
+            .on_hover_text("Clear search")
+            .clicked()
+    {
+        pane.search.clear();
+        acts.push(Action::SetSearch(String::new()));
+    }
 
-        let mut mode = state.settings.view_mode;
-        ui.selectable_value(&mut mode, ViewMode::Grid, "Grid");
-        ui.selectable_value(&mut mode, ViewMode::List, "List");
-        if mode != state.settings.view_mode {
-            acts.push(Action::SetViewMode(mode));
-        }
+    theme::group_separator(ui);
+    kind_menu(ui, &state.filters.kinds, acts);
+    sort_menu(
+        ui,
+        state.settings.sort_key,
+        state.settings.sort_ascending,
+        acts,
+    );
+}
 
-        let mut collapse = state.settings.collapse_sequences;
-        if ui.checkbox(&mut collapse, "Group sequences").changed() {
-            acts.push(Action::SetCollapseSequences(collapse));
-        }
-
-        if state.settings.view_mode == ViewMode::Grid {
-            let mut idx = nearest_size_index(state.settings.thumbnail_size);
-            let label = format!("{} px", SIZES.get(idx).copied().unwrap_or(128));
-            ui.spacing_mut().slider_width = 90.0;
-            let slider = egui::Slider::new(&mut idx, 0..=SIZES.len() - 1)
-                .show_value(false)
-                .text(label);
-            if ui.add(slider).changed()
-                && let Some(size) = SIZES.get(idx)
+/// view mode | group sequences | size slider | counts.
+fn toolbar_view(ui: &mut egui::Ui, state: &AppState, acts: &mut Vec<Action>) {
+    let mut mode = state.settings.view_mode;
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for (m, label) in [(ViewMode::Grid, "Grid"), (ViewMode::List, "List")] {
+            if ui
+                .add(egui::Button::selectable(mode == m, label))
+                .on_hover_text(format!("{label} view"))
+                .clicked()
             {
-                acts.push(Action::SetThumbnailSize(*size));
+                mode = m;
             }
         }
-
-        let selected = state.selection.items.len();
-        let mut counts = format!(
-            "{} item{}",
-            state.entries.len(),
-            if state.entries.len() == 1 { "" } else { "s" }
-        );
-        if selected > 0 {
-            counts.push_str(&format!(" · {selected} selected"));
-        }
-        ui.label(RichText::new(counts).weak());
     });
+    if mode != state.settings.view_mode {
+        acts.push(Action::SetViewMode(mode));
+    }
+
+    theme::group_separator(ui);
+    let collapse = state.settings.collapse_sequences;
+    if ui
+        .add(egui::Button::selectable(collapse, "Group sequences"))
+        .on_hover_text("Show image sequences as a single item")
+        .clicked()
+    {
+        acts.push(Action::SetCollapseSequences(!collapse));
+    }
+
+    if state.settings.view_mode == ViewMode::Grid {
+        theme::group_separator(ui);
+        let mut idx = nearest_size_index(state.settings.thumbnail_size);
+        let label = format!("{} px", SIZES.get(idx).copied().unwrap_or(128));
+        ui.spacing_mut().slider_width = 90.0;
+        let slider = egui::Slider::new(&mut idx, 0..=SIZES.len() - 1)
+            .show_value(false)
+            .text(label);
+        if ui.add(slider).changed()
+            && let Some(size) = SIZES.get(idx)
+        {
+            acts.push(Action::SetThumbnailSize(*size));
+        }
+    }
+
+    theme::group_separator(ui);
+    let selected = state.selection.items.len();
+    let mut counts = format!(
+        "{} item{}",
+        state.entries.len(),
+        if state.entries.len() == 1 { "" } else { "s" }
+    );
+    if selected > 0 {
+        counts.push_str(&format!(" · {selected} selected"));
+    }
+    ui.label(RichText::new(counts).weak());
 }
 
 fn kind_label(kind: MediaKind) -> &'static str {

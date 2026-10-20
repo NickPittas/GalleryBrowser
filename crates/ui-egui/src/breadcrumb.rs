@@ -8,37 +8,40 @@ use crate::theme;
 /// Clickable path segments of `state.nav.current` + back/forward/up buttons; click pushes Action::Navigate.
 pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
-        if ui
-            .add_enabled(!state.nav.back.is_empty(), egui::Button::new("◀"))
-            .on_hover_text("Back (Alt+Left)")
-            .clicked()
-        {
-            state.push(Action::Back);
-        }
-        if ui
-            .add_enabled(!state.nav.forward.is_empty(), egui::Button::new("▶"))
-            .on_hover_text("Forward (Alt+Right)")
-            .clicked()
-        {
-            state.push(Action::Forward);
-        }
+        let has_back = !state.nav.back.is_empty();
+        let has_forward = !state.nav.forward.is_empty();
         let has_parent = state
             .nav
             .current
             .as_ref()
             .is_some_and(|p| p.parent().is_some());
-        if ui
-            .add_enabled(has_parent, egui::Button::new("▲"))
-            .on_hover_text("Parent folder (Backspace)")
-            .clicked()
-        {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        if nav_button(ui, has_back, theme::Icon::Back, "Back", "Back (Alt+Left)") {
+            state.push(Action::Back);
+        }
+        if nav_button(
+            ui,
+            has_forward,
+            theme::Icon::Forward,
+            "Forward",
+            "Forward (Alt+Right)",
+        ) {
+            state.push(Action::Forward);
+        }
+        if nav_button(
+            ui,
+            has_parent,
+            theme::Icon::Up,
+            "Parent folder",
+            "Parent folder (Backspace)",
+        ) {
             state.push(Action::Up);
         }
-        if ui.button("⟳").on_hover_text("Refresh (F5)").clicked() {
+        if nav_button(ui, true, theme::Icon::Refresh, "Refresh", "Refresh (F5)") {
             state.push(Action::Refresh);
         }
-        ui.separator();
-        ui.label(egui::RichText::new("Path").color(theme::TEXT_MUTED));
+        ui.spacing_mut().item_spacing.x = 6.0;
+        theme::group_separator(ui);
 
         match (&state.filters.scope, &state.nav.current) {
             (FilterScope::Library, _) => {
@@ -56,20 +59,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
                     .stick_to_right(true)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 3.0;
+                            ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
                             for (i, (label, target)) in segments.into_iter().enumerate() {
                                 let text = elide(&label, 28);
-                                let mut rt = egui::RichText::new(text);
-                                if i == last {
-                                    rt = rt.strong();
-                                }
                                 let resp = ui
-                                    .add(egui::Button::new(rt).frame(false))
+                                    .add(egui::Button::selectable(i == last, text))
                                     .on_hover_text(target.display().to_string());
                                 if resp.clicked() {
                                     state.push(Action::Navigate(target));
                                 }
                                 if i != last {
-                                    ui.label(egui::RichText::new("›").color(theme::TEXT_MUTED));
+                                    theme::path_separator(ui);
                                 }
                             }
                         });
@@ -77,6 +78,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) {
             }
         }
     });
+}
+
+/// Icon button that is greyed out and inert when `enabled` is false; true when clicked.
+fn nav_button(ui: &mut egui::Ui, enabled: bool, icon: theme::Icon, label: &str, tip: &str) -> bool {
+    ui.add_enabled_ui(enabled, |ui| {
+        theme::icon_button(ui, icon, label)
+            .on_hover_text(tip)
+            .on_disabled_hover_text(tip)
+            .clicked()
+    })
+    .inner
 }
 
 /// (label, accumulated absolute path) for the root and every component.

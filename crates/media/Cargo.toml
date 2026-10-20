@@ -31,3 +31,4 @@ flate2 = "1"
 [dev-dependencies]
 tempfile = { workspace = true }
 png = "0.18"
+exr = "1.74.2"
