@@ -36,17 +36,26 @@ pub fn bind(socket: &Path) -> io::Result<Listener> {
 pub fn serve<H: Fn(io::Result<Vec<u8>>)>(listener: Listener, handle: H) {
     for conn in listener.incoming() {
         match conn {
-            Ok(stream) => handle(
-                stream
-                    .set_read_timeout(Some(IO_TIMEOUT))
-                    .and_then(|()| read_bytes(stream)),
-            ),
+            Ok(stream) => handle(read_message(stream)),
             Err(e) => {
                 log::warn!("instance socket accept failed: {e}");
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
     }
+}
+
+/// Reads one connection's message under a time limit. macOS/BSD refuse `SO_RCVTIMEO` (EINVAL) on a
+/// socket whose peer has already closed — which is the normal case for a short-lived sender — so
+/// when the timeout cannot be set the read goes non-blocking instead: a closed peer has already
+/// delivered all its bytes and EOF, and a peer that still has the connection open and
+/// is not done is rejected rather than allowed to stall the accept loop.
+fn read_message(stream: UnixStream) -> io::Result<Vec<u8>> {
+    if let Err(e) = stream.set_read_timeout(Some(IO_TIMEOUT)) {
+        log::debug!("instance socket read timeout unavailable ({e}); reading non-blocking");
+        stream.set_nonblocking(true)?;
+    }
+    read_bytes(stream)
 }
 
 /// Removes the socket file.

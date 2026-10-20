@@ -182,10 +182,28 @@ pub(crate) fn remove_node(p: &Path) -> io::Result<()> {
     }
 }
 
+/// True when `to` names the file `from` already is, spelled with different letter case — the same
+/// directory entry on a case-insensitive filesystem (Windows, default macOS). A distinct file whose
+/// name merely differs in case, or a hard link, is not.
+pub(crate) fn is_case_variant_of_same_file(from: &Path, to: &Path) -> bool {
+    let (Some(a), Some(b)) = (from.file_name(), to.file_name()) else {
+        return false;
+    };
+    from.parent() == to.parent()
+        && a != b
+        && a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+        && same_file::is_same_file(from, to).unwrap_or(false)
+}
+
 /// Move `src` to the exact path `dst`, refusing to overwrite. Falls back to copy + remove across
-/// filesystems.
+/// filesystems. A case-only rename on a case-insensitive filesystem (where `dst` "exists" because it
+/// is `src`) goes through a temporary name, since renaming a file onto its own case variant can be a
+/// no-op.
 pub(crate) fn move_exact(src: &Path, dst: &Path) -> Result<(), FsError> {
     if exists_nofollow(dst) {
+        if is_case_variant_of_same_file(src, dst) {
+            return case_only_rename(src, dst);
+        }
         return Err(FsError::Exists);
     }
     match fs::rename(src, dst) {
@@ -212,6 +230,29 @@ pub(crate) fn move_exact(src: &Path, dst: &Path) -> Result<(), FsError> {
             }
         }
         Err(e) => Err(FsError::Io(e)),
+    }
+}
+
+/// Rename `src` to its own case variant `dst` through a temporary sibling name. If `dst` still exists
+/// once `src` has moved away (they were distinct links, not one entry), the original is restored.
+fn case_only_rename(src: &Path, dst: &Path) -> Result<(), FsError> {
+    let parent = src.parent().unwrap_or_else(|| Path::new("."));
+    let pid = std::process::id();
+    let tmp = (0u32..=1000)
+        .map(|n| parent.join(format!(".gbcase-{pid}-{n}.tmp")))
+        .find(|c| !exists_nofollow(c))
+        .ok_or_else(|| FsError::Io(io::Error::other("could not find a free temporary name")))?;
+    fs::rename(src, &tmp)?;
+    if exists_nofollow(dst) {
+        let _ = fs::rename(&tmp, src);
+        return Err(FsError::Exists);
+    }
+    match fs::rename(&tmp, dst) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::rename(&tmp, src);
+            Err(FsError::Io(e))
+        }
     }
 }
 

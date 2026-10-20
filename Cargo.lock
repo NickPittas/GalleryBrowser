@@ -1771,6 +1771,7 @@ dependencies = [
  "gallerybrowser-core",
  "log",
  "regex",
+ "same-file",
  "tempfile",
  "thiserror 2.0.21",
  "trash",

@@ -857,6 +857,51 @@ mod tests {
     }
 
     #[test]
+    fn case_only_rename_works_single_and_batch() {
+        let d = tempfile::tempdir().expect("tmp");
+        let a = d.path().join("image.jpg");
+        write(&a, "a");
+        let upper = d.path().join("IMAGE.JPG");
+        let w = FileOpsWorker::new();
+        let id = w.submit(FileOp::Rename {
+            from: a.clone(),
+            to: upper.clone(),
+        });
+        let o = wait_finished(&w, id);
+        assert!(o.errors.is_empty(), "{:?}", o.errors);
+        assert_eq!(o.moved, vec![(a.clone(), upper.clone())]);
+        let names: Vec<_> = fs::read_dir(d.path())
+            .expect("dir")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("IMAGE.JPG")]);
+        assert_eq!(read(&upper), "a");
+
+        // Batch (plan + apply) of the case change back, plus an unrelated second file.
+        let b = d.path().join("other.jpg");
+        write(&b, "b");
+        let rule = RenameRule {
+            case_mode: crate::rename::CaseMode::Lower,
+            scope: crate::rename::RenameScope::NameAndExtension,
+            ..Default::default()
+        };
+        let plan = plan_renames(&rule, &[upper.clone(), b]);
+        assert!(plan.is_valid(), "{plan:?}");
+        let id = w.submit(FileOp::BatchRename { plan });
+        let o = wait_finished(&w, id);
+        assert!(o.errors.is_empty(), "{:?}", o.errors);
+        let mut names: Vec<String> = fs::read_dir(d.path())
+            .expect("dir")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["image.jpg".to_string(), "other.jpg".to_string()]
+        );
+    }
+
+    #[test]
     fn batch_rename_cycle_and_undo() {
         let d = tempfile::tempdir().expect("tmp");
         let one = d.path().join("1.jpg");

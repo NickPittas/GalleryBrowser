@@ -4,7 +4,7 @@ use std::time::UNIX_EPOCH;
 
 use regex::{NoExpand, RegexBuilder};
 
-use crate::fsops::exists_nofollow;
+use crate::fsops::{exists_nofollow, is_case_variant_of_same_file};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CaseMode {
@@ -199,6 +199,12 @@ pub fn plan_renames(rule: &RenameRule, files: &[PathBuf]) -> RenamePlan {
         .filter(|i| i.status == RenameStatus::Ok)
         .map(|i| i.from.clone())
         .collect();
+    // Vacated sources by (directory, lowercased name): on a case-insensitive filesystem a target that
+    // "exists" may just be a case variant of a source that is about to move away.
+    let mut vacated_by_name: HashMap<(Option<PathBuf>, String), Vec<&PathBuf>> = HashMap::new();
+    for src in &vacated {
+        vacated_by_name.entry(case_key(src)).or_default().push(src);
+    }
     let mut target_count: HashMap<PathBuf, usize> = HashMap::new();
     for it in items.iter().filter(|i| i.status == RenameStatus::Ok) {
         *target_count.entry(it.to.clone()).or_default() += 1;
@@ -206,11 +212,26 @@ pub fn plan_renames(rule: &RenameRule, files: &[PathBuf]) -> RenamePlan {
     for it in items.iter_mut().filter(|i| i.status == RenameStatus::Ok) {
         if target_count.get(&it.to).copied().unwrap_or(0) > 1 {
             it.status = RenameStatus::Collision("another item gets the same name".into());
-        } else if exists_nofollow(&it.to) && !vacated.contains(&it.to) {
+        } else if exists_nofollow(&it.to)
+            && !vacated.contains(&it.to)
+            && !vacated_by_name.get(&case_key(&it.to)).is_some_and(|srcs| {
+                srcs.iter()
+                    .any(|src| is_case_variant_of_same_file(src, &it.to))
+            })
+        {
             it.status = RenameStatus::Collision("a file with this name already exists".into());
         }
     }
     RenamePlan { items }
+}
+
+fn case_key(p: &Path) -> (Option<PathBuf>, String) {
+    (
+        p.parent().map(Path::to_path_buf),
+        p.file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default(),
+    )
 }
 
 enum Finder {
@@ -640,6 +661,19 @@ mod tests {
                 .iter()
                 .all(|i| matches!(i.status, RenameStatus::Collision(_)))
         );
+    }
+
+    #[test]
+    fn case_only_rename_is_not_a_collision() {
+        let d = tempfile::tempdir().expect("tmp");
+        let a = touch(d.path(), "image.jpg");
+        let rule = RenameRule {
+            case_mode: CaseMode::Upper,
+            ..Default::default()
+        };
+        let plan = plan_renames(&rule, std::slice::from_ref(&a));
+        assert_eq!(plan.items[0].to, d.path().join("IMAGE.jpg"));
+        assert!(plan.is_valid(), "{plan:?}");
     }
 
     #[test]
