@@ -17,7 +17,9 @@ const MAX_DEPTH: usize = 96;
 /// open in file manager, new folder.
 #[derive(Default)]
 pub struct TreeState {
-    expanded: HashSet<PathBuf>,
+    /// Expanded rows keyed by (top-level root, path): the same folder reachable from two roots
+    /// (e.g. `/mnt/2Tb` under Computer and as its own mount root) expands independently.
+    expanded: HashSet<(PathBuf, PathBuf)>,
     /// Lazily listed children, dropped whenever `AppState::tree_generation` changes.
     children: HashMap<PathBuf, Vec<PathBuf>>,
     exists: HashMap<PathBuf, bool>,
@@ -45,6 +47,8 @@ struct Frame<'a> {
     external_drop: Vec<PathBuf>,
     acts: Vec<Action>,
     remove_recent: Option<PathBuf>,
+    /// The single filesystem root that shows the current folder: the deepest root containing it.
+    target_root: Option<PathBuf>,
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState, tree: &mut TreeState) {
@@ -54,11 +58,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, tree: &mut TreeState) {
         tree.exists.clear();
         tree.roots = fs_roots();
     }
+    let target_root = state
+        .pane()
+        .nav
+        .current
+        .as_ref()
+        .and_then(|cur| target_root_for(cur, &tree.roots));
     if tree.last_nav != state.pane().nav.current {
         tree.last_nav = state.pane().nav.current.clone();
-        if let Some(cur) = &state.pane().nav.current {
-            for a in cur.ancestors().skip(1) {
-                tree.expanded.insert(a.to_path_buf());
+        if let (Some(cur), Some(root)) = (&state.pane().nav.current, &target_root) {
+            for a in cur.ancestors().skip(1).filter(|a| a.starts_with(root)) {
+                tree.expanded.insert((root.clone(), a.to_path_buf()));
             }
         }
         tree.scroll_to_current = true;
@@ -85,6 +95,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, tree: &mut TreeState) {
         external_drop,
         acts: Vec::new(),
         remove_recent: None,
+        target_root,
         tree,
     };
     let mut clear_recents = false;
@@ -105,7 +116,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, tree: &mut TreeState) {
                     }
                     for p in list {
                         ui.push_id("fav", |ui| {
-                            node(ui, &mut f, &p, None, 0, Section::Favorites)
+                            node(ui, &mut f, &p, &p, None, 0, Section::Favorites)
                         });
                     }
                 });
@@ -121,7 +132,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, tree: &mut TreeState) {
                     }
                     for p in list {
                         ui.push_id(("recent", &p), |ui| {
-                            node(ui, &mut f, &p, None, 0, Section::Recent)
+                            node(ui, &mut f, &p, &p, None, 0, Section::Recent)
                         });
                     }
                 });
@@ -135,7 +146,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, tree: &mut TreeState) {
             ui.push_id("fs_roots", |ui| {
                 let roots = f.tree.roots.clone();
                 for (label, root) in roots {
-                    node(ui, &mut f, &root, label, 0, Section::Filesystem);
+                    node(ui, &mut f, &root, &root, label, 0, Section::Filesystem);
                 }
             });
         });
@@ -184,6 +195,7 @@ impl Frame<'_> {
 fn node(
     ui: &mut egui::Ui,
     f: &mut Frame<'_>,
+    root: &Path,
     path: &Path,
     label: Option<&str>,
     depth: usize,
@@ -191,7 +203,8 @@ fn node(
 ) {
     // Recent rows are a flat list of visited folders: never expandable, never show children.
     let flat = section == Section::Recent;
-    let expanded = !flat && f.tree.expanded.contains(path);
+    let key = (root.to_path_buf(), path.to_path_buf());
+    let expanded = !flat && f.tree.expanded.contains(&key);
     if expanded {
         f.load_children(path);
     }
@@ -201,7 +214,9 @@ fn node(
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string())
     });
-    let selected = f.current.as_deref() == Some(path);
+    // Filesystem rows: only the target root highlights the current folder, so it opens once.
+    let selected = f.current.as_deref() == Some(path)
+        && (section != Section::Filesystem || f.target_root.as_deref() == Some(root));
     let other_pane = !selected && f.other.as_deref() == Some(path);
     let indent = depth as f32 * INDENT;
 
@@ -283,13 +298,17 @@ fn node(
             f.acts.push(Action::Navigate(path.to_path_buf()));
         }
         // Clicking the arrow toggles only; clicking the label navigates and toggles (like the Python tree).
-        toggled = can_expand;
+        // A label click on a folder that a deeper root owns (e.g. `/mnt/2Tb` under Computer) only
+        // navigates: the owning root opens it, so the folder never opens twice.
+        let owns = section != Section::Filesystem
+            || target_root_for(path, &f.tree.roots).as_deref() == Some(root);
+        toggled = can_expand && (on_arrow || owns);
     }
     if toggled {
         if expanded {
-            f.tree.expanded.remove(path);
+            f.tree.expanded.remove(&key);
         } else {
-            f.tree.expanded.insert(path.to_path_buf());
+            f.tree.expanded.insert(key);
             f.load_children(path);
         }
     }
@@ -361,13 +380,23 @@ fn node(
     if expanded && depth < MAX_DEPTH {
         let kids = f.tree.children.get(path).cloned().unwrap_or_default();
         for k in kids {
-            node(ui, f, &k, None, depth + 1, section);
+            node(ui, f, root, &k, None, depth + 1, section);
         }
     }
 }
 
 /// A top-level filesystem root: optional fixed label (otherwise the folder name) and its path.
 type FsRoot = (Option<&'static str>, PathBuf);
+
+/// The deepest root that is `cur` or one of its ancestors (`/mnt/2Tb` beats `/` for `/mnt/2Tb/x`).
+fn target_root_for(cur: &Path, roots: &[FsRoot]) -> Option<PathBuf> {
+    roots
+        .iter()
+        .map(|(_, r)| r)
+        .filter(|r| cur.starts_with(r))
+        .max_by_key(|r| r.components().count())
+        .cloned()
+}
 
 /// Roots listed under the Favorites/Recent sections, in display order. Linux: `/`, Home, mounted media.
 /// macOS: `/`, Home, `/Volumes/*`. Windows: Home, then every existing drive letter (no `/` root).
@@ -416,4 +445,24 @@ fn mount_roots() -> Vec<PathBuf> {
         .map(|letter| PathBuf::from(format!("{}:\\", char::from(letter))))
         .filter(|root| root.is_dir())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deepest_root_owns_the_folder() {
+        let roots: Vec<FsRoot> = vec![
+            (Some("Computer"), PathBuf::from("/")),
+            (Some("Home"), PathBuf::from("/home/u")),
+            (None, PathBuf::from("/mnt/2Tb")),
+        ];
+        let r = |p: &str| target_root_for(Path::new(p), &roots);
+        assert_eq!(r("/mnt/2Tb"), Some(PathBuf::from("/mnt/2Tb")));
+        assert_eq!(r("/mnt/2Tb/shots"), Some(PathBuf::from("/mnt/2Tb")));
+        assert_eq!(r("/mnt/2Tbx"), Some(PathBuf::from("/")));
+        assert_eq!(r("/home/u/Videos"), Some(PathBuf::from("/home/u")));
+        assert_eq!(r("/mnt"), Some(PathBuf::from("/")));
+    }
 }

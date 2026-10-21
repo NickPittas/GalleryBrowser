@@ -25,12 +25,20 @@ Prebuilt packages for each release are attached to the
 
 ### Linux (Flatpak)
 
-Download `GalleryBrowser-<ver>.flatpak` from Releases, then:
+Download `GalleryBrowser-<ver>.flatpak` from Releases, then install it for your user. The same command
+installs fresh or upgrades an existing GalleryBrowser:
 
 ```sh
-flatpak install --user GalleryBrowser-<ver>.flatpak
+flatpak install --user -y --reinstall ./GalleryBrowser-<ver>.flatpak
 flatpak run io.github.nickpittas.GalleryBrowser
 ```
+
+- Always pass `--user`: a system install (no `--user`) asks for a password through polkit and hangs
+  forever on desktops without an authentication agent.
+- Pass `-y`: without it flatpak first resolves the runtime from Flathub (the first run downloads its
+  metadata and can sit silently for a while) and then waits at a `Proceed? [Y/n]` prompt that is easy to
+  miss, so it looks frozen.
+- If an install ever seems stuck, add `--verbose` to see the step it is on.
 
 ### macOS (11 or later, Apple Silicon and Intel)
 
