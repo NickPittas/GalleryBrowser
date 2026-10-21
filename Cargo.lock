@@ -1738,7 +1738,7 @@ dependencies = [
 
 [[package]]
 name = "gallerybrowser"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "eframe",
  "egui",
@@ -1752,7 +1752,7 @@ dependencies = [
 
 [[package]]
 name = "gallerybrowser-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "directories",
  "log",
@@ -1765,7 +1765,7 @@ dependencies = [
 
 [[package]]
 name = "gallerybrowser-fileops"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "crossbeam-channel",
  "gallerybrowser-core",
@@ -1779,7 +1779,7 @@ dependencies = [
 
 [[package]]
 name = "gallerybrowser-library"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "gallerybrowser-core",
  "lightcraft-catalog",
@@ -1793,7 +1793,7 @@ dependencies = [
 
 [[package]]
 name = "gallerybrowser-media"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "crossbeam-channel",
  "exr",
@@ -1819,7 +1819,7 @@ dependencies = [
 
 [[package]]
 name = "gallerybrowser-player"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "cpal",
  "crossbeam-channel",
@@ -1832,7 +1832,7 @@ dependencies = [
 
 [[package]]
 name = "gallerybrowser-ui-egui"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "craft-ui",

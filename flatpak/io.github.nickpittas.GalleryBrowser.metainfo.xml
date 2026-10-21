@@ -38,6 +38,11 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.2.2" date="2026-10-21">
+      <description>
+        <p>Folder tree opens a folder only under its own mount entry (no duplicate /mnt expansion); clearer Flatpak install instructions.</p>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-10-21">
       <description>
         <p>Fix single-instance file forwarding on macOS and case-only renames on case-insensitive filesystems.</p>
