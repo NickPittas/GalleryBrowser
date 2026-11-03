@@ -4,7 +4,7 @@ members = ["crates/*", "apps/*"]
 default-members = ["crates/*", "apps/*"]
 
 [workspace.package]
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 license = "MIT"
 rust-version = "1.95"
@@ -24,6 +24,7 @@ filmcraft-time = { git = "https://github.com/storytold/filmcraft", rev = "70f0fc
 filmcraft-frame = { git = "https://github.com/storytold/filmcraft", rev = "70f0fc7a75f2681bc18302e67eaf0c9d41c68873" }
 filmcraft-media = { git = "https://github.com/storytold/filmcraft", rev = "70f0fc7a75f2681bc18302e67eaf0c9d41c68873" }
 filmcraft-codecs = { git = "https://github.com/storytold/filmcraft", rev = "70f0fc7a75f2681bc18302e67eaf0c9d41c68873" }
+filmcraft-hevc = { git = "https://github.com/storytold/filmcraft", rev = "70f0fc7a75f2681bc18302e67eaf0c9d41c68873" }
 photocraft-codecs = { git = "https://github.com/storytold/photocraft", rev = "872748fb5b2a53e09dd4e385e31968d985c0515b" }
 photocraft-psd = { git = "https://github.com/storytold/photocraft", rev = "872748fb5b2a53e09dd4e385e31968d985c0515b" }
 lightcraft-catalog = { git = "https://github.com/storytold/lightcraft", rev = "5fe74557eca64638b1f9015c9769f7e52a889fa2" }

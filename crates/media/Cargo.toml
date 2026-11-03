@@ -15,6 +15,7 @@ filmcraft-time = { workspace = true }
 filmcraft-frame = { workspace = true }
 filmcraft-media = { workspace = true }
 filmcraft-codecs = { workspace = true }
+filmcraft-hevc = { workspace = true }
 photocraft-codecs = { workspace = true }
 photocraft-psd = { workspace = true }
 lightcraft-preview = { workspace = true }

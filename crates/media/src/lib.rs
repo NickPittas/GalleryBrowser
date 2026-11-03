@@ -6,6 +6,7 @@
 
 mod comfy;
 mod guard;
+mod heif;
 pub mod image;
 pub mod metadata;
 pub mod open;

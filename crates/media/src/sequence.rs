@@ -18,7 +18,7 @@ use filmcraft_media::{
 use filmcraft_time::{FrameRate, Tick};
 
 use crate::guard::{self, Guarded};
-use crate::open::{ext_lower, file_name, photocraft_rgba, read_capped};
+use crate::open::{ext_lower, file_name, heif_rgba, photocraft_rgba, read_capped};
 use crate::{MediaError, Result, SharedSource};
 
 /// Decoded-frame cache budget (same as filmcraft's `ImageSequenceSource`).
@@ -83,7 +83,12 @@ fn decode_file(path: &Path, rate: FrameRate) -> Result<Decoded> {
     match guard::catch(|| decode_filmcraft(&name, &bytes, rate).map_err(guard::convert)) {
         Ok(d) => Ok(d),
         Err(first) => {
-            let (w, h, rgba, has_alpha) = photocraft_rgba(&name, &bytes).map_err(|_| first)?;
+            let decoded = if crate::heif::sniff(&bytes) {
+                heif_rgba(&name, &bytes)
+            } else {
+                photocraft_rgba(&name, &bytes)
+            };
+            let (w, h, rgba, has_alpha) = decoded.map_err(|_| first)?;
             Ok(Decoded {
                 frame: VideoFrame::rgba8(w, h, rgba),
                 has_alpha,

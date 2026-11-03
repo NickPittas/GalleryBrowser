@@ -17,10 +17,10 @@ pub enum MediaKind {
 /// plus formats the ArtCraft decoders handle (dpx hdr dng psb).
 ///
 /// Literals mirror `filmcraft_media::STILL_EXTENSIONS` (core must not depend on filmcraft) plus the Python
-/// extras `psd`/`psb`.
+/// extras `psd`/`psb` and `heic`/`heif` (decoded by gallerybrowser-media's HEIF reader).
 pub const IMAGE_EXTENSIONS: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "webp", "tif", "tiff", "bmp", "tga", "dpx", "exr", "hdr", "dng",
-    "psd", "psb",
+    "psd", "psb", "heic", "heif",
 ];
 /// Superset of the Python app (mp4 mov avi mkv mxf webm mpg mpeg) plus filmcraft_media::VIDEO_EXTENSIONS.
 pub const VIDEO_EXTENSIONS: &[&str] = &[

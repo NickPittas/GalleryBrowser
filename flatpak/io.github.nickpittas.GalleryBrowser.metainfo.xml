@@ -38,6 +38,11 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.2.3" date="2026-11-03">
+      <description>
+        <p>Preview iPhone photos: HEIC/HEIF images now show thumbnails and open in the viewer.</p>
+      </description>
+    </release>
     <release version="0.2.2" date="2026-10-21">
       <description>
         <p>Folder tree opens a folder only under its own mount entry (no duplicate /mnt expansion); clearer Flatpak install instructions.</p>

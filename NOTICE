@@ -5,7 +5,7 @@ GalleryBrowser uses the following ArtCraft crates, pinned by git revision in the
 ([workspace.dependencies]). They are licensed MIT OR Apache-2.0.
 Copyright (c) ArtCraft Team and contributors.
 
-  filmcraft-time, filmcraft-frame, filmcraft-media, filmcraft-codecs
+  filmcraft-time, filmcraft-frame, filmcraft-media, filmcraft-codecs, filmcraft-hevc
       https://github.com/storytold/filmcraft  rev 70f0fc7a75f2681bc18302e67eaf0c9d41c68873
   photocraft-codecs, photocraft-psd
       https://github.com/storytold/photocraft  rev 872748fb5b2a53e09dd4e385e31968d985c0515b

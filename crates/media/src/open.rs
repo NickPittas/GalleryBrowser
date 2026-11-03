@@ -45,12 +45,16 @@ pub(crate) fn read_capped(path: &Path) -> Result<Vec<u8>> {
 /// `filmcraft_media::reader::open_reader_within` + `filmcraft_codecs::reader_openers()` on a
 /// `FileReader` (same call as filmcraft engine/src/media_pool.rs `probe_file`): only the container
 /// index is read at open, samples on demand. Hardware decoders (`filmcraft-platform`, VA-API) are NOT
-/// used. PSD/PSB and other photocraft-only formats are wrapped as still sources.
+/// used. PSD/PSB, HEIF/HEIC (`heif.rs`) and other photocraft-only formats are wrapped as still sources.
 pub fn open(path: &Path) -> Result<SharedSource> {
     let name = file_name(path);
     let ext = ext_lower(path);
     if matches!(ext.as_str(), "psd" | "psb") {
         return open_psd(path, &name);
+    }
+    if matches!(ext.as_str(), "heic" | "heif" | "hif") {
+        let bytes = read_capped(path)?;
+        return rgba_still(&name, heif_rgba(&name, &bytes)?, bytes.len() as u64);
     }
     let reader: SharedReader = Arc::new(FileReader::open(path).map_err(|e| io_err(path, &e))?);
     let opened = guard::catch(|| {
@@ -83,15 +87,38 @@ fn open_with_photocraft(path: &Path, name: &str) -> Result<SharedSource> {
     if bytes.starts_with(b"8BPS") {
         return psd_still(name, &bytes);
     }
-    let (w, h, rgba, has_alpha) = photocraft_rgba(name, &bytes)?;
+    let decoded = if crate::heif::sniff(&bytes) {
+        heif_rgba(name, &bytes)?
+    } else {
+        photocraft_rgba(name, &bytes)?
+    };
+    rgba_still(name, decoded, bytes.len() as u64)
+}
+
+/// A decoded RGBA8 picture (width, height, pixels, has alpha) served as a still source.
+fn rgba_still(
+    name: &str,
+    decoded: (u32, u32, Vec<u8>, bool),
+    file_size: u64,
+) -> Result<SharedSource> {
+    let (w, h, rgba, has_alpha) = decoded;
     Ok(Guarded::wrap(Arc::new(StillSource::from_rgba(
-        name,
-        w,
-        h,
-        rgba,
-        has_alpha,
-        bytes.len() as u64,
+        name, w, h, rgba, has_alpha, file_size,
     ))))
+}
+
+/// Decode a HEIF/HEIC file (iPhone photos: HEVC through `filmcraft-hevc`, see `heif.rs`) to opaque
+/// RGBA8: width, height, pixels, has alpha (always false).
+pub(crate) fn heif_rgba(name: &str, bytes: &[u8]) -> Result<(u32, u32, Vec<u8>, bool)> {
+    guard::catch(|| {
+        let (w, h, rgba) = crate::heif::decode(bytes).map_err(|e| match e {
+            MediaError::Decode(m) => MediaError::Decode(format!("{name}: {m}")),
+            MediaError::Unsupported(m) => MediaError::Unsupported(format!("{name}: {m}")),
+            other => other,
+        })?;
+        check_rgba(name, w, h, rgba.len())?;
+        Ok((w, h, rgba, false))
+    })
 }
 
 /// Decode `bytes` through photocraft-codecs (multi-part / multi-layer OpenEXR included: the beauty
