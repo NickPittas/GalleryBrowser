@@ -27,3 +27,9 @@ flatpak/*.flatpak
 # OS
 .DS_Store
 Thumbs.db
+/.flatpak-repo/
+/dist-windows/
+*.log
+__pycache__/
+.serena/
+pandacode-run.sh
