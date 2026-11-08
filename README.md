@@ -3,6 +3,17 @@
 A fast, video-first media browser for Linux, written in Rust (egui + wgpu) on the
 [ArtCraft](https://github.com/storytold) stack. No ffmpeg, no GStreamer: all decoding is pure Rust.
 
+<!-- moeffect-demo:start -->
+## Demo
+
+Watch the landscape demonstration below.
+
+https://github.com/user-attachments/assets/cd6d7d20-aeea-4c38-8ba8-3f5ddf3de71d
+
+[Watch on the website and read more about the tool](https://moeffect.gr/index.php/tools/gallerybrowser/).
+
+<!-- moeffect-demo:end -->
+
 ## Features
 
 - **Video-first browsing**: MOV/MP4, MXF, MKV/WebM, AVI, MPEG-TS; ProRes, DNxHD/HR, H.264, HEVC, AV1, VP8/VP9.
