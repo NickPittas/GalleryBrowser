@@ -29,6 +29,7 @@ flatpak/*.flatpak
 Thumbs.db
 /.flatpak-repo/
 /dist-windows/
+/dist/
 *.log
 __pycache__/
 .serena/

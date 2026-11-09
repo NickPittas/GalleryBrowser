@@ -3,6 +3,8 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -18,7 +20,7 @@ env:
   CARGO_INCREMENTAL: "0"
   GH_REPO: ${{ github.repository }}
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
 
 jobs:
   release:
@@ -43,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -58,8 +60,8 @@ jobs:
           cargo build --release --locked -p gallerybrowser --target aarch64-apple-darwin
           cargo build --release --locked -p gallerybrowser --target x86_64-apple-darwin
 
-      - name: Install rsvg-convert
-        run: brew install librsvg
+      - name: Install rsvg-convert (optional)
+        run: brew install librsvg || true
 
       - name: Assemble app bundle and dmg
         run: |
@@ -82,7 +84,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
